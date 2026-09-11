@@ -143,6 +143,15 @@
 		B1F747F92EC7E94000F841DB /* LottieView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F747F82EC7E94000F841DB /* LottieView.swift */; };
 		B1FEB4992C7686630066EBBC /* PanGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1FEB4982C7686630066EBBC /* PanGesture.swift */; };
 		F38DE6482D8243E7008B5C6D /* BatteryActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38DE6472D8243E2008B5C6D /* BatteryActivityManager.swift */; };
+		129AF084303C4A8EAFDBEE68 /* CodexUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1273872EBE28433B9BDEFA46 /* CodexUsage.swift */; };
+		5274AA4AEFC1476180513319 /* CodexUsageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F75178EFD4846CDB65B2299 /* CodexUsageManager.swift */; };
+		E9E69B4997C5469185630FF4 /* CodexUsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 298C10E125CB4C65A1B3D024 /* CodexUsageService.swift */; };
+		041126157AEF4EC9838D01E1 /* CodexExecutableLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 682C987976554E4E98A464D0 /* CodexExecutableLocator.swift */; };
+		BFB42ACCDB9B4E26BFB97D8A /* BoundedProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A0FCF14CF04537A94D6B02 /* BoundedProcessRunner.swift */; };
+		DA67AD7074FD4178B3B036CA /* JSONRPCResponseCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8351BE61683648118096D02B /* JSONRPCResponseCursor.swift */; };
+		FCD0422C69FF4E1C98A7D955 /* CodexLocalCostService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1147FDFE42425FA07C60EA /* CodexLocalCostService.swift */; };
+		2F7B76367F554516A8BF8CDF /* CodexResetForecastService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C99E04E22845A6BD21A67D /* CodexResetForecastService.swift */; };
+		A50368DD872E4041AE061B02 /* CodexTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3974A75E62241E0BDC39018 /* CodexTabView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -309,6 +318,15 @@
 		B1F747F82EC7E94000F841DB /* LottieView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LottieView.swift; sourceTree = "<group>"; };
 		B1FEB4982C7686630066EBBC /* PanGesture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanGesture.swift; sourceTree = "<group>"; };
 		F38DE6472D8243E2008B5C6D /* BatteryActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryActivityManager.swift; sourceTree = "<group>"; };
+		1273872EBE28433B9BDEFA46 /* CodexUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsage.swift; sourceTree = "<group>"; };
+		4F75178EFD4846CDB65B2299 /* CodexUsageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageManager.swift; sourceTree = "<group>"; };
+		298C10E125CB4C65A1B3D024 /* CodexUsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageService.swift; sourceTree = "<group>"; };
+		682C987976554E4E98A464D0 /* CodexExecutableLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexExecutableLocator.swift; sourceTree = "<group>"; };
+		76A0FCF14CF04537A94D6B02 /* BoundedProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedProcessRunner.swift; sourceTree = "<group>"; };
+		8351BE61683648118096D02B /* JSONRPCResponseCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONRPCResponseCursor.swift; sourceTree = "<group>"; };
+		FF1147FDFE42425FA07C60EA /* CodexLocalCostService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLocalCostService.swift; sourceTree = "<group>"; };
+		42C99E04E22845A6BD21A67D /* CodexResetForecastService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResetForecastService.swift; sourceTree = "<group>"; };
+		E3974A75E62241E0BDC39018 /* CodexTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTabView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -571,6 +589,7 @@
 				14D570BA2C5E98E30011E668 /* enums */,
 				14D570B72C5E98960011E668 /* animations */,
 				147163B52C5D804B0068B555 /* managers */,
+				946BE653456146C69C6B4F96 /* Codex */,
 				1153BD8E2D986B1F00979FB0 /* MediaControllers */,
 				B15063502C63D3F600EBB0E3 /* extensions */,
 				1471639B2C5D362F0068B555 /* components */,
@@ -755,6 +774,22 @@
 				B1C4489A2C97376A001F0858 /* TipStore.swift */,
 			);
 			path = Tips;
+			sourceTree = "<group>";
+		};
+		946BE653456146C69C6B4F96 /* Codex */ = {
+			isa = PBXGroup;
+			children = (
+				1273872EBE28433B9BDEFA46 /* CodexUsage.swift */,
+				4F75178EFD4846CDB65B2299 /* CodexUsageManager.swift */,
+				298C10E125CB4C65A1B3D024 /* CodexUsageService.swift */,
+				682C987976554E4E98A464D0 /* CodexExecutableLocator.swift */,
+				76A0FCF14CF04537A94D6B02 /* BoundedProcessRunner.swift */,
+				8351BE61683648118096D02B /* JSONRPCResponseCursor.swift */,
+				FF1147FDFE42425FA07C60EA /* CodexLocalCostService.swift */,
+				42C99E04E22845A6BD21A67D /* CodexResetForecastService.swift */,
+				E3974A75E62241E0BDC39018 /* CodexTabView.swift */,
+			);
+			path = Codex;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1020,6 +1055,15 @@
 				1100290C2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift in Sources */,
 				11CFC6632E09918400748C80 /* MusicControllerSelectionView.swift in Sources */,
 				B1F0A0022E60000100000001 /* BrightnessManager.swift in Sources */,
+				129AF084303C4A8EAFDBEE68 /* CodexUsage.swift in Sources */,
+				5274AA4AEFC1476180513319 /* CodexUsageManager.swift in Sources */,
+				E9E69B4997C5469185630FF4 /* CodexUsageService.swift in Sources */,
+				041126157AEF4EC9838D01E1 /* CodexExecutableLocator.swift in Sources */,
+				BFB42ACCDB9B4E26BFB97D8A /* BoundedProcessRunner.swift in Sources */,
+				DA67AD7074FD4178B3B036CA /* JSONRPCResponseCursor.swift in Sources */,
+				FCD0422C69FF4E1C98A7D955 /* CodexLocalCostService.swift in Sources */,
+				2F7B76367F554516A8BF8CDF /* CodexResetForecastService.swift in Sources */,
+				A50368DD872E4041AE061B02 /* CodexTabView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
