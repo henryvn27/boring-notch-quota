@@ -44,6 +44,7 @@ class BoringViewModel: NSObject, ObservableObject {
 
     @Published var notchSize: CGSize = getClosedNotchSize()
     @Published var closedNotchSize: CGSize = getClosedNotchSize()
+    private var automaticTabCancellable: AnyCancellable?
     
     let webcamManager = WebcamManager.shared
     @Published var isCameraExpanded: Bool = false
@@ -198,7 +199,20 @@ class BoringViewModel: NSObject, ObservableObject {
     }
 
     func open() {
+        automaticTabCancellable?.cancel()
         coordinator.prepareViewForOpening(isPlaying: MusicManager.shared.isPlaying)
+
+        // The cached playback flag can lag behind the active player during
+        // launch. Listen for the forced refresh below so the automatic choice
+        // settles on the actual state without overriding a user-selected tab.
+        automaticTabCancellable = MusicManager.shared.$isPlaying
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isPlaying in
+                guard let self, self.notchState == .open else { return }
+                self.coordinator.prepareViewForOpening(isPlaying: isPlaying)
+            }
 
         withAnimation(NotchMotion.open) {
             self.notchSize = openNotchSize
@@ -214,6 +228,8 @@ class BoringViewModel: NSObject, ObservableObject {
         if SharingStateManager.shared.preventNotchClose {
             return
         }
+        automaticTabCancellable?.cancel()
+        automaticTabCancellable = nil
         withAnimation(NotchMotion.close) {
             self.notchSize = getClosedNotchSize(screenUUID: self.screenUUID)
             self.closedNotchSize = self.notchSize
