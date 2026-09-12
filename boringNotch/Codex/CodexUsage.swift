@@ -269,10 +269,32 @@ struct CodexCostMeasurement: Equatable, Sendable {
     let partial: Bool
 }
 
+struct CodexCostDay: Identifiable, Equatable, Sendable {
+    let date: Date
+    let amount: Decimal
+    let pricedTokenCount: Int64
+    let unpricedTokenCount: Int64
+
+    var id: Date { date }
+    var totalTokenCount: Int64 { pricedTokenCount + unpricedTokenCount }
+}
+
+struct CodexCostModel: Identifiable, Equatable, Sendable {
+    let model: String
+    let amount: Decimal
+    let pricedTokenCount: Int64
+    let unpricedTokenCount: Int64
+
+    var id: String { model }
+    var totalTokenCount: Int64 { pricedTokenCount + unpricedTokenCount }
+}
+
 struct CodexCostEstimate: Equatable, Sendable {
     let measurement: CodexCostMeasurement
     let pricedTokenCount: Int64
     let unpricedTokenCount: Int64
+    let dailyBreakdown: [CodexCostDay]
+    let modelBreakdown: [CodexCostModel]
     let refreshedAt: Date
 }
 

@@ -1,4 +1,5 @@
 import Defaults
+import Foundation
 import SwiftUI
 
 struct CodexTabView: View {
@@ -9,21 +10,17 @@ struct CodexTabView: View {
     @Default(.codexShowPace) private var showPace
     @Default(.codexShowCostEstimate) private var showCostEstimate
     @Default(.codexShowResetForecast) private var showResetForecast
+    @State private var showingCostDetail = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 12) {
-                if showCostEstimate {
-                    apiCostCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                if showResetForecast {
-                    forecastCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
+        Group {
+            if showingCostDetail {
+                apiCostDetailView
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                overviewView
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
-
-            quotaGraphs
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -41,7 +38,25 @@ struct CodexTabView: View {
             manager.refreshNow()
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Codex quota and usage")
+        .accessibilityLabel(showingCostDetail ? "API equivalent details" : "Codex quota and usage")
+        .animation(.easeInOut(duration: 0.2), value: showingCostDetail)
+    }
+
+    private var overviewView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                if showCostEstimate {
+                    apiCostCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                if showResetForecast {
+                    forecastCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+
+            quotaGraphs
+        }
     }
 
     private var quotaGraphs: some View {
@@ -136,28 +151,279 @@ struct CodexTabView: View {
     }
 
     private var apiCostCard: some View {
-        CodexCard(
-            title: "API equivalent",
-            subtitle: "This Mac · 30 days"
-        ) {
-            if let estimate = manager.costEstimate {
+        Button {
+            showingCostDetail = true
+        } label: {
+            CodexCard(
+                title: "API equivalent",
+                subtitle: "This Mac · 30 days",
+                showsDisclosure: true
+            ) {
+                if let estimate = manager.costEstimate {
+                    if estimate.pricedTokenCount > 0 {
+                        Text(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))
+                            .font(.title2.weight(.semibold).monospacedDigit())
+                            .accessibilityLabel("API equivalent \(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))")
+                    } else {
+                        Text("—")
+                            .font(.title2.weight(.semibold).monospacedDigit())
+                            .accessibilityLabel("No priced local usage")
+                    }
+                } else if let error = manager.costError {
+                    unavailableRow(error)
+                } else {
+                    loadingRow("Reading local cost…")
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Open daily and model cost breakdown")
+    }
+
+    private var apiCostDetailView: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Button {
+                    showingCostDetail = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to Codex overview")
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("API equivalent")
+                        .font(.caption.weight(.semibold))
+                    Text(costIntervalLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    manager.refreshNow()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Refresh API equivalent")
+            }
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 7) {
+                    if let estimate = manager.costEstimate {
+                        costSummary(estimate)
+                        dailyCostBreakdown(estimate)
+                        modelCostBreakdown(estimate)
+                        costCoverageNote(estimate)
+                    } else if let error = manager.costError {
+                        unavailableRow(error)
+                    } else {
+                        loadingRow("Reading local cost…")
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("API equivalent details")
+    }
+
+    private var costIntervalLabel: String {
+        guard let estimate = manager.costEstimate else { return "This Mac · local history" }
+        let start = estimate.measurement.interval.start.formatted(.dateTime.month(.abbreviated).day())
+        let end = estimate.measurement.interval.end.formatted(.dateTime.month(.abbreviated).day())
+        return "This Mac · \(start)–\(end)"
+    }
+
+    private func costSummary(_ estimate: CodexCostEstimate) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
                 if estimate.pricedTokenCount > 0 {
-                    Text(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))
+                    Text(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))
                         .font(.title2.weight(.semibold).monospacedDigit())
-                        .accessibilityLabel("API equivalent \(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))")
                 } else {
                     Text("—")
                         .font(.title2.weight(.semibold).monospacedDigit())
-                        .accessibilityLabel("No priced local usage")
                 }
-
-            } else if let error = manager.costError {
-                unavailableRow(error)
-            } else {
-                loadingRow("Reading local cost…")
+                Text("API-price estimate")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
+            Spacer(minLength: 4)
+
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(tokenString(estimate.pricedTokenCount))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                Text("priced tokens")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("Updated \(CodexTimeFormatter.relative(estimate.refreshedAt))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func dailyCostBreakdown(_ estimate: CodexCostEstimate) -> some View {
+        let days = Array(estimate.dailyBreakdown.prefix(14).reversed())
+        let maximum = days.map { decimalDouble($0.amount) }.max() ?? 0
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("By day")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 4)
+                Text(days.isEmpty ? "No priced activity" : "Last \(days.count) active days")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if days.isEmpty {
+                Text("No priced local usage was found in this period.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                HStack(alignment: .bottom, spacing: 4) {
+                    ForEach(days) { day in
+                        VStack(spacing: 2) {
+                            Text(shortCurrencyString(day.amount, code: estimate.measurement.currency))
+                                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
+
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.accentColor.opacity(0.82))
+                                .frame(height: barHeight(for: day.amount, maximum: maximum))
+
+                            Text(shortDayLabel(day.date))
+                                .font(.system(size: 8, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .bottom)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            "\(day.date.formatted(date: .abbreviated, time: .omitted)), "
+                                + currencyString(day.amount, code: estimate.measurement.currency)
+                        )
+                    }
+                }
+                .frame(height: 68, alignment: .bottom)
+            }
+        }
+    }
+
+    private func modelCostBreakdown(_ estimate: CodexCostEstimate) -> some View {
+        let models = Array(estimate.modelBreakdown.prefix(5))
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("By model")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 4)
+                Text("API-price equivalent")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if models.isEmpty {
+                Text("Model detail is unavailable until local token usage is found.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(models) { model in
+                    HStack(spacing: 6) {
+                        Text(model.model)
+                            .font(.caption2.weight(.medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(currencyString(model.amount, code: estimate.measurement.currency))
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                        Text(tokenString(model.totalTokenCount))
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 42, alignment: .trailing)
+                    }
+                }
+            }
+        }
+    }
+
+    private func costCoverageNote(_ estimate: CodexCostEstimate) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if estimate.measurement.partial || estimate.unpricedTokenCount > 0 {
+                Label(
+                    estimate.unpricedTokenCount > 0
+                        ? "Partial estimate · \(tokenString(estimate.unpricedTokenCount)) unpriced tokens"
+                        : "Partial estimate · some local usage was excluded",
+                    systemImage: "circle.dashed"
+                )
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.orange)
+            }
+
+            Text("Estimate only; not your subscription charge or an actual bill. Local Codex history is read on this Mac.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let pricingAsOf = estimate.measurement.pricingAsOf {
+                Text("Rates reviewed \(pricingAsOf.formatted(.dateTime.month(.abbreviated).day().year()))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func currencyString(_ amount: Decimal, code: String) -> String {
+        NSDecimalNumber(decimal: amount).doubleValue.formatted(.currency(code: code))
+    }
+
+    private func shortCurrencyString(_ amount: Decimal, code: String) -> String {
+        let value = decimalDouble(amount)
+        if value >= 100 {
+            return value.formatted(.number.precision(.fractionLength(0)))
+        }
+        return value.formatted(.number.precision(.fractionLength(2)))
+    }
+
+    private func tokenString(_ count: Int64) -> String {
+        let value = Double(max(0, count))
+        if value >= 1_000_000_000 {
+            let formatted = (value / 1_000_000_000).formatted(.number.precision(.fractionLength(1)))
+            return "\(formatted)B"
+        }
+        if value >= 1_000_000 {
+            let formatted = (value / 1_000_000).formatted(.number.precision(.fractionLength(1)))
+            return "\(formatted)M"
+        }
+        if value >= 1_000 {
+            let formatted = (value / 1_000).formatted(.number.precision(.fractionLength(1)))
+            return "\(formatted)K"
+        }
+        return Int64(value).formatted()
+    }
+
+    private func decimalDouble(_ amount: Decimal) -> Double {
+        NSDecimalNumber(decimal: amount).doubleValue
+    }
+
+    private func barHeight(for amount: Decimal, maximum: Double) -> CGFloat {
+        guard maximum > 0 else { return 4 }
+        return max(4, CGFloat(decimalDouble(amount) / maximum) * 42)
+    }
+
+    private func shortDayLabel(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     private var forecastCard: some View {
@@ -278,15 +544,18 @@ struct CodexTabView: View {
 private struct CodexCard<Content: View>: View {
     let title: String
     let subtitle: String
+    let showsDisclosure: Bool
     @ViewBuilder let content: () -> Content
 
     init(
         title: String,
         subtitle: String,
+        showsDisclosure: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.showsDisclosure = showsDisclosure
         self.content = content
     }
 
@@ -304,6 +573,13 @@ private struct CodexCard<Content: View>: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
             }
 
             content()

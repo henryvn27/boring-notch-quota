@@ -64,6 +64,8 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var pricedTokens: Int64 = 0
         var unpricedTokens: Int64 = 0
         var partial = false
+        var dailyTotals: [Date: CostAggregate] = [:]
+        var modelTotals: [String: CostAggregate] = [:]
 
         for url in files {
             try Task.checkCancellation()
@@ -76,6 +78,33 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             pricedTokens += result.pricedTokens
             unpricedTokens += result.unpricedTokens
             partial = partial || result.partial
+            for contribution in result.contributions {
+                let day = Calendar.current.startOfDay(for: contribution.date)
+                dailyTotals[day, default: CostAggregate()].add(contribution)
+                modelTotals[contribution.model, default: CostAggregate()].add(contribution)
+            }
+        }
+
+        let dailyBreakdown = dailyTotals.map { date, aggregate in
+            CodexCostDay(
+                date: date,
+                amount: aggregate.amount,
+                pricedTokenCount: aggregate.pricedTokenCount,
+                unpricedTokenCount: aggregate.unpricedTokenCount
+            )
+        }.sorted { $0.date > $1.date }
+        let modelBreakdown = modelTotals.map { model, aggregate in
+            CodexCostModel(
+                model: model,
+                amount: aggregate.amount,
+                pricedTokenCount: aggregate.pricedTokenCount,
+                unpricedTokenCount: aggregate.unpricedTokenCount
+            )
+        }.sorted {
+            if $0.amount == $1.amount {
+                return $0.model.localizedStandardCompare($1.model) == .orderedAscending
+            }
+            return $0.amount > $1.amount
         }
 
         return CodexCostEstimate(
@@ -88,6 +117,8 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             ),
             pricedTokenCount: pricedTokens,
             unpricedTokenCount: unpricedTokens,
+            dailyBreakdown: dailyBreakdown,
+            modelBreakdown: modelBreakdown,
             refreshedAt: Date()
         )
     }
@@ -122,10 +153,12 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         }
         defer { try? handle.close() }
 
+        let fallbackDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate ?? interval.start
         var buffer = Data()
         var previous = TokenCounters.zero
         var intervalPrevious: TokenCounters?
-        var contributions: [(model: String?, usage: TokenCounters)] = []
+        var contributions: [(date: Date, model: String?, usage: TokenCounters)] = []
         var model: String?
         var sawRecord = false
         var partial = false
@@ -172,7 +205,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 if intervalPrevious == nil { intervalPrevious = previous }
                 if let intervalPrevious {
                     if let delta = counters.delta(from: intervalPrevious), !delta.isZero {
-                        contributions.append((model: model, usage: delta))
+                        contributions.append(
+                            (date: timestamp ?? fallbackDate, model: model, usage: delta)
+                        )
                     } else if counters != intervalPrevious {
                         // A counter reset or interleaved rollout is not safely
                         // attributable; resume from the new high-water mark.
@@ -207,14 +242,35 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
 
         var result = ScanResult(partial: partial)
         for contribution in contributions {
-            guard let model = contribution.model,
-                  let rates = Self.rates(for: model) else {
-                result.unpricedTokens += contribution.usage.billableTokens
+            let model = contribution.model ?? "Unknown model"
+            let billableTokens = contribution.usage.billableTokens
+            guard let rawModel = contribution.model,
+                  let rates = Self.rates(for: rawModel) else {
+                result.unpricedTokens += billableTokens
                 result.partial = true
+                result.contributions.append(
+                    CostContribution(
+                        date: contribution.date,
+                        model: model,
+                        amount: .zero,
+                        pricedTokenCount: 0,
+                        unpricedTokenCount: billableTokens
+                    )
+                )
                 continue
             }
-            result.amount += Self.cost(for: contribution.usage, rates: rates)
-            result.pricedTokens += contribution.usage.billableTokens
+            let amount = Self.cost(for: contribution.usage, rates: rates)
+            result.amount += amount
+            result.pricedTokens += billableTokens
+            result.contributions.append(
+                CostContribution(
+                    date: contribution.date,
+                    model: model,
+                    amount: amount,
+                    pricedTokenCount: billableTokens,
+                    unpricedTokenCount: 0
+                )
+            )
         }
         return result
     }
@@ -422,6 +478,27 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var pricedTokens: Int64 = 0
         var unpricedTokens: Int64 = 0
         var partial = false
+        var contributions: [CostContribution] = []
+    }
+
+    private struct CostContribution {
+        let date: Date
+        let model: String
+        let amount: Decimal
+        let pricedTokenCount: Int64
+        let unpricedTokenCount: Int64
+    }
+
+    private struct CostAggregate {
+        var amount: Decimal = .zero
+        var pricedTokenCount: Int64 = 0
+        var unpricedTokenCount: Int64 = 0
+
+        mutating func add(_ contribution: CostContribution) {
+            amount += contribution.amount
+            pricedTokenCount += contribution.pricedTokenCount
+            unpricedTokenCount += contribution.unpricedTokenCount
+        }
     }
 
     private struct TokenCounters: Equatable {
