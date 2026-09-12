@@ -133,7 +133,7 @@ struct CodexUsageService: CodexUsageFetching, Sendable {
             "id": 0,
             "params": [
               "clientInfo": [
-                "name": "boring-notch", "title": "boring.notch", "version": appVersion,
+                "name": "boring-notch-quota", "title": "Boring Notch Quota", "version": appVersion,
               ]
             ],
           ]))
