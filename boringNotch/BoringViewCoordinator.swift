@@ -90,7 +90,7 @@ class BoringViewCoordinator: ObservableObject {
         }
     }
 
-    @AppStorage("openLastTabByDefault") var openLastTabByDefault: Bool = true {
+    @AppStorage("openLastTabByDefault") var openLastTabByDefault: Bool = false {
         didSet {
             if openLastTabByDefault {
                 alwaysShowTabs = true
@@ -120,14 +120,15 @@ class BoringViewCoordinator: ObservableObject {
     private var hudReplacementCancellable: AnyCancellable?
 
     private init() {
-        // Apply the default at the point where the coordinator is guaranteed
-        // to be initialized. This also upgrades existing installs that still
-        // have the old `false` value without changing the setting again after
-        // the user makes a deliberate choice.
+        // Apply the current default at the point where the coordinator is
+        // guaranteed to be initialized. The versioned marker lets existing
+        // installs move off the previous remember-last-tab default once,
+        // without changing the setting again after this migration.
         let defaults = UserDefaults.standard
-        if defaults.object(forKey: "didApplyDefaultExperience_v6") == nil {
-            defaults.set(true, forKey: "openLastTabByDefault")
-            defaults.set(true, forKey: "didApplyDefaultExperience_v6")
+        if defaults.object(forKey: "didApplyDefaultExperience_v7") == nil {
+            defaults.set(false, forKey: "openLastTabByDefault")
+            defaults.set(false, forKey: "lastNotchTabWasUserSelected")
+            defaults.set(true, forKey: "didApplyDefaultExperience_v7")
         }
 
         // Perform migration from name-based to UUID-based storage
@@ -335,9 +336,16 @@ class BoringViewCoordinator: ObservableObject {
     /// Select the tab to show when the notch opens.
     ///
     /// A tab chosen by the user is remembered when that preference is enabled.
-    /// Until then, opening follows the media-aware default: Home while audio is
-    /// playing and Codex when the player is idle.
-    func prepareViewForOpening(isPlaying: Bool) {
+    /// An explicit entry view (for example, tapping the Codex wing) takes
+    /// precedence over remembering and over the media-aware default.
+    func prepareViewForOpening(isPlaying: Bool, preferredView: NotchViews? = nil) {
+        if let preferredView {
+            applyingAutomaticView = true
+            currentView = preferredView
+            applyingAutomaticView = false
+            return
+        }
+
         if openLastTabByDefault,
            lastNotchTabWasUserSelected,
            let rememberedTab = NotchViews(rawValue: lastNotchTabRawValue)

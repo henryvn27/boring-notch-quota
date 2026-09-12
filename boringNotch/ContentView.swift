@@ -154,9 +154,12 @@ struct ContentView: View {
                     .onHover { hovering in
                         handleHover(hovering)
                     }
-                    .onTapGesture {
-                        doOpen()
-                    }
+                    .gesture(
+                        SpatialTapGesture()
+                            .onEnded { value in
+                                openFromClosedTap(at: value.location)
+                            }
+                    )
                     // The open notch owns its vertical content gestures. Install the
                     // pull-down opener only while the notch is closed so it cannot
                     // compete with content interactions.
@@ -240,7 +243,7 @@ struct ContentView: View {
             if isTargeted {
                 if vm.notchState == .closed {
                     coordinator.currentView = .shelf
-                    doOpen()
+                    doOpen(preferredView: .shelf)
                 }
                 return
             }
@@ -315,8 +318,7 @@ struct ContentView: View {
                               notchWidth: vm.closedNotchSize.width,
                               height: vm.effectiveClosedNotchHeight,
                               action: {
-                                  coordinator.currentView = .codex
-                                  doOpen()
+                                  doOpen(preferredView: .codex)
                               }
                           )
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
@@ -553,8 +555,35 @@ struct ContentView: View {
         }
     }
 
-    private func doOpen() {
-        vm.open()
+    private func doOpen(preferredView: NotchViews? = nil) {
+        vm.open(preferredView: preferredView)
+    }
+
+    private func openFromClosedTap(at location: CGPoint) {
+        guard vm.notchState == .closed else { return }
+
+        // When music owns the compact center, the left half is the media
+        // entry point and the right wing is the Codex entry point. The spatial
+        // tap location is local to this fixed-width notch layout, so it stays
+        // correct across display scale factors and multiple screens.
+        if shouldDisplayMusicLiveActivity {
+            // The compact music layout is intrinsically sized (it is much
+            // narrower than the host window), so use the same width that
+            // drives its visible chin rather than the full window width.
+            let isRightSide = location.x >= computedChinWidth / 2
+            doOpen(preferredView: isRightSide ? .codex : .home)
+            return
+        }
+
+        // The compact Codex readout is itself the Codex entry point. This is
+        // also important when the usage-first mode is selected while music is
+        // playing, because the parent tap should not fall back to Home.
+        if shouldDisplayCodexUsage {
+            doOpen(preferredView: .codex)
+            return
+        }
+
+        doOpen()
     }
 
     // MARK: - Hover Management

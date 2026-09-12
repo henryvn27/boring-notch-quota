@@ -201,22 +201,30 @@ class BoringViewModel: NSObject, ObservableObject {
         return false
     }
 
-    func open() {
+    func open(preferredView: NotchViews? = nil) {
         automaticTabCancellable?.cancel()
         automaticTabRefreshTask?.cancel()
-        coordinator.prepareViewForOpening(isPlaying: MusicManager.shared.isPlaying)
+        coordinator.prepareViewForOpening(
+            isPlaying: MusicManager.shared.isPlaying,
+            preferredView: preferredView
+        )
 
         // The cached playback flag can lag behind the active player during
         // launch. Listen for the forced refresh below so the automatic choice
         // settles on the actual state without overriding a user-selected tab.
-        automaticTabCancellable = MusicManager.shared.$isPlaying
-            .dropFirst()
-            .removeDuplicates()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isPlaying in
-                guard let self, self.notchState == .open else { return }
-                self.coordinator.prepareViewForOpening(isPlaying: isPlaying)
-            }
+        // An explicit entry point (such as the left/right closed-notch tap)
+        // owns the tab for this opening and must not be replaced when the
+        // media controller publishes its first refresh.
+        if preferredView == nil {
+            automaticTabCancellable = MusicManager.shared.$isPlaying
+                .dropFirst()
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] isPlaying in
+                    guard let self, self.notchState == .open else { return }
+                    self.coordinator.prepareViewForOpening(isPlaying: isPlaying)
+                }
+        }
 
         withAnimation(NotchMotion.open) {
             self.notchSize = openNotchSize
@@ -228,21 +236,24 @@ class BoringViewModel: NSObject, ObservableObject {
 
         // The first controller refresh can finish after the open animation,
         // especially immediately after launch. Give that refresh a short,
-        // bounded window to settle the media-aware default. The coordinator
-        // still preserves an explicit user-selected tab when remembering is on.
-        automaticTabRefreshTask = Task { @MainActor [weak self] in
-            for attempt in 0..<3 {
-                if attempt > 0 {
-                    try? await Task.sleep(for: .milliseconds(250))
-                }
+        // bounded window to settle the media-aware default. An explicit view
+        // does not need this retry because it is intentionally pinned for the
+        // current opening.
+        if preferredView == nil {
+            automaticTabRefreshTask = Task { @MainActor [weak self] in
+                for attempt in 0..<3 {
+                    if attempt > 0 {
+                        try? await Task.sleep(for: .milliseconds(250))
+                    }
 
-                guard !Task.isCancelled, let self, self.notchState == .open else {
-                    return
-                }
+                    guard !Task.isCancelled, let self, self.notchState == .open else {
+                        return
+                    }
 
-                self.coordinator.prepareViewForOpening(isPlaying: MusicManager.shared.isPlaying)
-                if attempt < 2 {
-                    MusicManager.shared.forceUpdate()
+                    self.coordinator.prepareViewForOpening(isPlaying: MusicManager.shared.isPlaying)
+                    if attempt < 2 {
+                        MusicManager.shared.forceUpdate()
+                    }
                 }
             }
         }

@@ -240,11 +240,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let uuid = screen.displayUUID else { return }
         
         if Defaults[.showOnAllDisplays], let viewModel = viewModels[uuid] {
-            viewModel.open()
-            coordinator.currentView = .shelf
+            viewModel.open(preferredView: .shelf)
         } else if !Defaults[.showOnAllDisplays], let windowScreen = window?.screen, screen == windowScreen {
-            vm.open()
-            coordinator.currentView = .shelf
+            vm.open(preferredView: .shelf)
         }
     }
 
@@ -538,12 +536,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Defaults[.didApplyDefaultExperienceV5] = true
         }
 
-        // Remembering the last tab is the useful default for both new and
-        // existing installs. The versioned migration keeps a deliberate user
-        // choice intact after this first application.
-        if !Defaults[.didApplyDefaultExperienceV6] {
-            UserDefaults.standard.set(true, forKey: "openLastTabByDefault")
-            Defaults[.didApplyDefaultExperienceV6] = true
+        // Start new and existing installs with the media-aware entry point.
+        // An explicit side tap or a user-enabled preference can still choose
+        // another tab, but the app should not remember tabs by default.
+        if !Defaults[.didApplyDefaultExperienceV7] {
+            UserDefaults.standard.set(false, forKey: "openLastTabByDefault")
+            UserDefaults.standard.set(false, forKey: "lastNotchTabWasUserSelected")
+            Defaults[.didApplyDefaultExperienceV7] = true
         }
     }
 
