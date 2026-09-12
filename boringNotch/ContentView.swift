@@ -25,6 +25,7 @@ struct ContentView: View {
     @ObservedObject var volumeManager = VolumeManager.shared
     @State private var hoverTask: Task<Void, Never>?
     @State private var isHovering: Bool = false
+    @State private var hoveredCompactEntrySide: CompactEntrySide?
     @State private var anyDropDebounceTask: Task<Void, Never>?
 
     @State private var gestureProgress: CGFloat = .zero
@@ -45,6 +46,11 @@ struct ContentView: View {
 
     private let extendedHoverPadding: CGFloat = 30
     private let zeroHeightHoverPadding: CGFloat = 10
+
+    private enum CompactEntrySide {
+        case left
+        case right
+    }
 
     private var contentWindowHeight: CGFloat {
         guard vm.notchState == .open else { return windowSize.height }
@@ -153,6 +159,9 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .onHover { hovering in
                         handleHover(hovering)
+                    }
+                    .onContinuousHover(coordinateSpace: .local) { phase in
+                        handleContinuousHover(phase)
                     }
                     .gesture(
                         SpatialTapGesture()
@@ -586,6 +595,41 @@ struct ContentView: View {
         doOpen()
     }
 
+    private func preferredViewForClosedHover() -> NotchViews? {
+        guard shouldDisplayMusicLiveActivity else {
+            return shouldDisplayCodexUsage ? .codex : nil
+        }
+
+        switch hoveredCompactEntrySide {
+        case .left:
+            return .home
+        case .right:
+            return .codex
+        case .none:
+            return nil
+        }
+    }
+
+    private func handleContinuousHover(_ phase: HoverPhase) {
+        guard vm.notchState == .closed, shouldDisplayMusicLiveActivity else {
+            hoveredCompactEntrySide = nil
+            return
+        }
+
+        switch phase {
+        case .active(let location):
+            // Keep this boundary identical to the tap path. The compact
+            // music layout uses the left half for Home/media and the right
+            // wing for Codex, including when the pace value grows to three
+            // digits.
+            hoveredCompactEntrySide = location.x >= computedChinWidth / 2 ? .right : .left
+        case .ended:
+            hoveredCompactEntrySide = nil
+        @unknown default:
+            hoveredCompactEntrySide = nil
+        }
+    }
+
     // MARK: - Hover Management
 
     private func handleHover(_ hovering: Bool) {
@@ -614,10 +658,11 @@ struct ContentView: View {
                           self.isHovering,
                           !self.coordinator.sneakPeek.show else { return }
                     
-                    self.doOpen()
+                    self.doOpen(preferredView: self.preferredViewForClosedHover())
                 }
             }
         } else {
+            hoveredCompactEntrySide = nil
             hoverTask = Task {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
