@@ -52,8 +52,15 @@ class BoringViewCoordinator: ObservableObject {
 
     private var applyingAutomaticView = false
 
-    @AppStorage("lastNotchTab") private var lastNotchTabRawValue: String = ""
-    @AppStorage("lastNotchTabWasUserSelected") private var lastNotchTabWasUserSelected: Bool = false
+    private var lastNotchTabRawValue: String {
+        get { UserDefaults.standard.string(forKey: "lastNotchTab") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "lastNotchTab") }
+    }
+
+    private var lastNotchTabWasUserSelected: Bool {
+        get { UserDefaults.standard.bool(forKey: "lastNotchTabWasUserSelected") }
+        set { UserDefaults.standard.set(newValue, forKey: "lastNotchTabWasUserSelected") }
+    }
 
     @Published var currentView: NotchViews = .home {
         didSet {
