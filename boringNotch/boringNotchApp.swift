@@ -464,6 +464,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Defaults[.showOnAllDisplays] = true
             Defaults[.didApplyDefaultExperienceV3] = true
         }
+
+        // Keep the media surface lively by default: live activity and the
+        // original Boring Notch sneak-peek treatment are enabled, while the
+        // existing three-second timeout remains the compact default.
+        if !Defaults[.didApplyDefaultExperienceV4] {
+            UserDefaults.standard.set(true, forKey: "musicLiveActivityEnabled")
+            Defaults[.showOnAllDisplays] = true
+            Defaults[.enableSneakPeek] = true
+            Defaults[.sneakPeekStyles] = .standard
+            Defaults[.waitInterval] = 3
+            Defaults[.didApplyDefaultExperienceV4] = true
+        }
     }
 
     func playWelcomeSound() {

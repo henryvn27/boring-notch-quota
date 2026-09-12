@@ -23,10 +23,13 @@ enum CodexLocalCostServiceError: LocalizedError {
 /// It intentionally reports partial coverage whenever a record or model cannot be priced.
 actor CodexLocalCostService: CodexLocalCostEstimating {
     private static let pricingAsOf = Date(timeIntervalSince1970: 1_784_505_600)
-    private static let maximumFileBytes = 16 * 1_024 * 1_024
+    private static let maximumFileBytes = 1_024 * 1_024 * 1_024
     private static let maximumLineBytes = 1 * 1_024 * 1_024
-    private static let maximumFiles = 250
-    private static let maximumScanDuration: TimeInterval = 12
+    // The local Codex history is intentionally bounded, but the old 250-file
+    // ceiling silently dropped a large part of an active user's month. Keep a
+    // generous ceiling and let the deadline be the final safety valve.
+    private static let maximumFiles = 1_000
+    private static let maximumScanDuration: TimeInterval = 45
 
     private let roots: [URL]
 
@@ -100,7 +103,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 }
                 return url
             }
-        }.sorted { $0.path < $1.path }
+        // Read the newest rollouts first if the bounded deadline is reached.
+        // That keeps the visible estimate useful while still marking it partial.
+        }.sorted { $0.path > $1.path }
         return Array(candidates.prefix(Self.maximumFiles))
     }
 
@@ -112,8 +117,8 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
 
         var buffer = Data()
         var previous = TokenCounters.zero
-        var baseline: TokenCounters?
-        var latest: TokenCounters?
+        var intervalPrevious: TokenCounters?
+        var contributions: [(model: String?, usage: TokenCounters)] = []
         var model: String?
         var sawRecord = false
         var partial = false
@@ -125,17 +130,19 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 return
             }
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                  let payload = object["payload"] as? [String: Any],
-                  payload["type"] as? String == "token_count",
-                  let info = payload["info"] as? [String: Any],
-                  let counters = TokenCounters(info: info) else {
+                  let payload = object["payload"] as? [String: Any] else {
                 // Codex JSONL includes many non-token records. They are not an error.
                 return
             }
-            sawRecord = true
-            if let candidate = payload["model"] as? String, !candidate.isEmpty {
+            if let candidate = Self.model(in: payload), !candidate.isEmpty {
                 model = candidate
             }
+            guard payload["type"] as? String == "token_count",
+                  let info = payload["info"] as? [String: Any],
+                  let counters = TokenCounters(info: info) else {
+                return
+            }
+            sawRecord = true
             let timestamp = (object["timestamp"] as? String).flatMap(Self.parseDate)
             let isInInterval: Bool
             if let timestamp {
@@ -145,8 +152,17 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 partial = true
             }
             if isInInterval {
-                if baseline == nil { baseline = previous }
-                latest = counters
+                if intervalPrevious == nil { intervalPrevious = previous }
+                if let intervalPrevious {
+                    if let delta = counters.delta(from: intervalPrevious), !delta.isZero {
+                        contributions.append((model: model, usage: delta))
+                    } else if counters != intervalPrevious {
+                        // A counter reset or interleaved rollout is not safely
+                        // attributable; resume from the new high-water mark.
+                        partial = true
+                    }
+                }
+                intervalPrevious = counters
             }
             previous = counters
         }
@@ -170,24 +186,30 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             partial = true
         }
 
-        guard sawRecord, let latest else { return ScanResult(partial: partial) }
-        let start = baseline ?? TokenCounters.zero
-        let delta = latest.delta(from: start)
-        guard !delta.isZero else { return ScanResult(partial: partial) }
-        guard let model, let rates = Self.rates(for: model) else {
-            return ScanResult(
-                pricedTokens: 0,
-                unpricedTokens: delta.billableTokens,
-                partial: true
-            )
-        }
+        guard sawRecord else { return ScanResult(partial: partial) }
 
-        return ScanResult(
-            amount: Self.cost(for: delta, rates: rates),
-            pricedTokens: delta.billableTokens,
-            unpricedTokens: 0,
-            partial: partial
-        )
+        var result = ScanResult(partial: partial)
+        for contribution in contributions {
+            guard let model = contribution.model,
+                  let rates = Self.rates(for: model) else {
+                result.unpricedTokens += contribution.usage.billableTokens
+                result.partial = true
+                continue
+            }
+            result.amount += Self.cost(for: contribution.usage, rates: rates)
+            result.pricedTokens += contribution.usage.billableTokens
+        }
+        return result
+    }
+
+    private static func model(in payload: [String: Any]) -> String? {
+        if let model = payload["model"] as? String, !model.isEmpty { return model }
+        if let settings = payload["thread_settings"] as? [String: Any],
+           let model = settings["model"] as? String,
+           !model.isEmpty {
+            return model
+        }
+        return nil
     }
 
     private static func parseDate(_ value: String) -> Date? {
@@ -199,8 +221,11 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
     private static func rates(for rawModel: String) -> Rates? {
         var model = rawModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if model.hasPrefix("openai/") { model.removeFirst("openai/".count) }
-        if model.count > 11, model.suffix(11).first == "-" {
-            model = String(model.dropLast(11))
+        if model.count > 11 {
+            let suffix = String(model.suffix(11))
+            if Self.isDateSuffix(suffix) {
+                model = String(model.dropLast(11))
+            }
         }
         switch model {
         case "gpt-5.6", "gpt-5.6-sol", "gpt-5-codex":
@@ -211,6 +236,15 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             return Rates(input: 1, cached: 0.1, cacheWrite: 1.25, output: 6)
         default:
             return nil
+        }
+    }
+
+    private static func isDateSuffix(_ suffix: String) -> Bool {
+        let bytes = Array(suffix.utf8)
+        guard bytes.count == 11,
+              bytes[0] == 45, bytes[5] == 45, bytes[8] == 45 else { return false }
+        return bytes.enumerated().allSatisfy { index, byte in
+            [0, 5, 8].contains(index) || (48...57).contains(byte)
         }
     }
 
@@ -244,7 +278,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var partial = false
     }
 
-    private struct TokenCounters {
+    private struct TokenCounters: Equatable {
         let input: Int64
         let cached: Int64
         let cacheWrite: Int64
@@ -265,12 +299,18 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var billableTokens: Int64 { max(0, input) + max(0, output) }
         var isZero: Bool { input == 0 && cached == 0 && cacheWrite == 0 && output == 0 }
 
-        func delta(from previous: TokenCounters) -> TokenCounters {
-            TokenCounters(
-                input: max(0, input - previous.input),
-                cached: max(0, cached - previous.cached),
-                cacheWrite: max(0, cacheWrite - previous.cacheWrite),
-                output: max(0, output - previous.output)
+        func delta(from previous: TokenCounters) -> TokenCounters? {
+            guard input >= previous.input,
+                  cached >= previous.cached,
+                  cacheWrite >= previous.cacheWrite,
+                  output >= previous.output else {
+                return nil
+            }
+            return TokenCounters(
+                input: input - previous.input,
+                cached: cached - previous.cached,
+                cacheWrite: cacheWrite - previous.cacheWrite,
+                output: output - previous.output
             )
         }
 

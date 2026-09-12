@@ -12,18 +12,20 @@ struct CodexTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            header
+            freshnessBar
 
-            HStack(alignment: .top, spacing: 7) {
-                quotaCard
+            HStack(alignment: .top, spacing: 12) {
                 if showCostEstimate {
                     apiCostCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 if showResetForecast {
                     forecastCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            quotaGraphs
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -44,12 +46,10 @@ struct CodexTabView: View {
         .accessibilityLabel("Codex quota and usage")
     }
 
-    private var header: some View {
+    private var freshnessBar: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Codex")
-                    .font(.headline.weight(.semibold))
-                Text("Local quota, cost, and reset signal")
+            if let latest = latestDataDate {
+                Text("Updated \(CodexTimeFormatter.relative(latest, from: presentationDate))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -66,30 +66,34 @@ struct CodexTabView: View {
         }
     }
 
-    private var quotaCard: some View {
-        CodexCard(
-            title: "Quota",
-            subtitle: "From the local Codex app",
-            isRefreshing: manager.isOfficialRefreshing,
-            action: { manager.refreshNow() }
-        ) {
-            if let snapshot = manager.snapshot {
-                Text(officialFreshness(snapshot))
-                    .font(.caption2)
-                    .foregroundStyle(manager.usageError == nil ? Color.secondary : Color.orange)
+    private var latestDataDate: Date? {
+        [
+            manager.snapshot?.fetchedAt,
+            manager.costEstimate?.refreshedAt,
+            manager.forecast?.fetchedAt,
+        ]
+        .compactMap { $0 }
+        .max()
+    }
 
-                HStack(alignment: .top, spacing: 7) {
+    private var quotaGraphs: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Usage")
+                    .font(.caption.weight(.semibold))
+                if manager.usageError != nil {
+                    Text("Stale")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if let snapshot = manager.snapshot {
+                HStack(alignment: .top, spacing: 12) {
                     ForEach(Array(visibleQuotaLimits(snapshot.limits).prefix(2))) { limit in
                         quotaWindow(limit, observedAt: snapshot.fetchedAt)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-
-                if manager.usageError != nil {
-                    Label("Showing the last quota", systemImage: "exclamationmark.circle")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
                 }
             } else if let error = manager.usageError {
                 unavailableRow(error)
@@ -142,11 +146,11 @@ struct CodexTabView: View {
         let points = Int(abs(pace.balancePercent).rounded())
         switch pace.status {
         case .reserve:
-            return "+\(points)% banked"
+            return "+\(points)%"
         case .onPace:
-            return "On pace"
+            return "+0%"
         case .deficit:
-            return "-\(points)% deficit"
+            return "-\(points)%"
         }
     }
 
@@ -161,49 +165,19 @@ struct CodexTabView: View {
                 if estimate.pricedTokenCount > 0 {
                     Text(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))
                         .font(.title2.weight(.semibold).monospacedDigit())
+                        .accessibilityLabel("API equivalent \(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))")
                 } else {
                     Text("—")
                         .font(.title2.weight(.semibold).monospacedDigit())
-                    Text(estimate.unpricedTokenCount > 0
-                        ? "No priced local usage"
-                        : "No local token counters found")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .accessibilityLabel("No priced local usage")
                 }
 
-                Text("Updated \(CodexTimeFormatter.relative(estimate.refreshedAt, from: presentationDate))")
-                    .font(.caption2)
-                    .foregroundStyle(manager.costError == nil ? Color.secondary : Color.orange)
-
-                if estimate.measurement.partial || estimate.unpricedTokenCount > 0 {
-                    Label("Partial local estimate", systemImage: "circle.dashed")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
-                }
-
-                if let pricingAsOf = estimate.measurement.pricingAsOf {
-                    Text("Rates as of \(pricingAsOf.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                if let error = manager.costError {
-                    Text(error)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .lineLimit(2)
-                }
             } else if let error = manager.costError {
                 unavailableRow(error)
             } else {
                 loadingRow("Reading local cost…")
             }
 
-            Link("OpenAI pricing", destination: URL(string: "https://developers.openai.com/api/docs/models/gpt-5.6-sol")!)
-                .font(.caption2)
         }
     }
 
@@ -215,27 +189,20 @@ struct CodexTabView: View {
             action: { manager.refreshNow() }
         ) {
             if let forecast = manager.forecast {
-                Text("\(Int(forecast.score.rounded()))%")
-                    .font(.title2.weight(.semibold).monospacedDigit())
-                Text("in the next \(forecast.horizonHours) hours")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                if let label = forecast.verdictLabel {
-                    Text(label)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(forecast.resetAnnounced ? .green : .secondary)
-                        .lineLimit(1)
-                }
-
-                if let fetchedAt = forecast.fetchedAt {
-                    Text("Source updated \(CodexTimeFormatter.relative(fetchedAt, from: presentationDate))")
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("\(Int(forecast.score.rounded()))%")
+                        .font(.title2.weight(.semibold).monospacedDigit())
+                    Text("next \(forecast.horizonHours)h")
                         .font(.caption2)
-                        .foregroundStyle(manager.forecastError == nil ? Color.secondary : Color.orange)
-                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
                 }
-                if forecast.sourceStale {
-                    Text("Source is stale")
+
+                if forecast.resetAnnounced {
+                    Text("Reset announced")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.green)
+                } else if forecast.sourceStale {
+                    Text("Stale signal")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
@@ -245,12 +212,6 @@ struct CodexTabView: View {
                 loadingRow("Loading forecast…")
             }
 
-            Link("Will Codex Reset?", destination: CodexResetForecast.sourceURL)
-                .font(.caption2)
-            Text("Third-party data, not a Notch estimate.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Unofficial reset forecast")
@@ -271,11 +232,6 @@ struct CodexTabView: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(2)
-    }
-
-    private func officialFreshness(_ snapshot: CodexUsageSnapshot) -> String {
-        let prefix = manager.usageError == nil ? "Updated" : "Stale · updated"
-        return "\(prefix) \(CodexTimeFormatter.relative(snapshot.fetchedAt, from: presentationDate))"
     }
 
     private func visibleQuotaLimits(_ limits: [CodexUsageLimit]) -> [CodexUsageLimit] {
@@ -385,7 +341,7 @@ private struct CodexCard<Content: View>: View {
             content()
         }
         .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

@@ -160,7 +160,7 @@ extension Defaults.Keys {
     
     // MARK: Media playback
     static let coloredSpectrogram = Key<Bool>("coloredSpectrogram", default: true)
-    static let enableSneakPeek = Key<Bool>("enableSneakPeek", default: false)
+    static let enableSneakPeek = Key<Bool>("enableSneakPeek", default: true)
     static let sneakPeekStyles = Key<SneakPeekStyle>("sneakPeekStyles", default: .standard)
     static let waitInterval = Key<Double>("waitInterval", default: 3)
     static let showShuffleAndRepeat = Key<Bool>("showShuffleAndRepeat", default: false)
@@ -226,6 +226,7 @@ extension Defaults.Keys {
     static let hideTitleBar = Key<Bool>("hideTitleBar", default: true)
     static let didApplyDefaultExperienceV2 = Key<Bool>("didApplyDefaultExperience_v2", default: false)
     static let didApplyDefaultExperienceV3 = Key<Bool>("didApplyDefaultExperience_v3", default: false)
+    static let didApplyDefaultExperienceV4 = Key<Bool>("didApplyDefaultExperience_v4", default: false)
     
     // Helper to determine the default media controller based on NowPlaying deprecation status
     static var defaultMediaController: MediaControllerType {
