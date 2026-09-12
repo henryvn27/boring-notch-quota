@@ -96,9 +96,9 @@ struct FileShareView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(.black.opacity(0.3))
                     .overlay(
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(0.8)
+                        Text("Preparing…")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.92))
                     )
             }
         }

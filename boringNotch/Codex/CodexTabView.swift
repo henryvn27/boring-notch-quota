@@ -125,9 +125,7 @@ struct CodexTabView: View {
     private var apiCostCard: some View {
         CodexCard(
             title: "API equivalent",
-            subtitle: "This Mac · 30 days",
-            isRefreshing: manager.isCostRefreshing,
-            action: { manager.refreshNow() }
+            subtitle: "This Mac · 30 days"
         ) {
             if let estimate = manager.costEstimate {
                 if estimate.pricedTokenCount > 0 {
@@ -150,14 +148,15 @@ struct CodexTabView: View {
     }
 
     private var forecastCard: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             if let forecast = manager.forecast {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text("\(Int(forecast.score.rounded()))%")
-                        .font(.title2.weight(.semibold).monospacedDigit())
-                    Text("next \(forecast.horizonHours)h")
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("chance of reset · next \(forecast.horizonHours)h")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 if forecast.resetAnnounced {
@@ -177,17 +176,14 @@ struct CodexTabView: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Reset forecast")
+        .accessibilityLabel("Chance of reset")
     }
 
     private func loadingRow(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            ProgressView().controlSize(.small)
-            Text(text)
-        }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .lineLimit(2)
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
     }
 
     private func unavailableRow(_ message: String) -> some View {
@@ -260,21 +256,15 @@ struct CodexTabView: View {
 private struct CodexCard<Content: View>: View {
     let title: String
     let subtitle: String
-    let isRefreshing: Bool
-    let action: () -> Void
     @ViewBuilder let content: () -> Content
 
     init(
         title: String,
         subtitle: String,
-        isRefreshing: Bool,
-        action: @escaping () -> Void,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
-        self.isRefreshing = isRefreshing
-        self.action = action
         self.content = content
     }
 
@@ -292,27 +282,23 @@ private struct CodexCard<Content: View>: View {
                 }
 
                 Spacer(minLength: 0)
-
-                Button(action: action) {
-                    CodexRefreshIndicator(isRefreshing: isRefreshing)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Refresh \(title)")
             }
 
             content()
         }
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityAction(named: "Refresh \(title)") {
+            CodexUsageManager.shared.refreshNow()
+        }
     }
 }
 
 enum CodexIdleUsageLayout {
     // Leave enough text width for the widest valid pace label ("-100%")
     // without making the closed notch feel materially wider.
-    static let sideWidth: CGFloat = 48
-    static let sidePadding: CGFloat = 3
+    static let sideWidth: CGFloat = 44
+    static let sidePadding: CGFloat = 2
     static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
 
     static func compactCenterWidth(for notchWidth: CGFloat) -> CGFloat {
@@ -354,7 +340,7 @@ struct CodexIdleUsageView: View {
         Button(action: action) {
             HStack(spacing: 0) {
                 Text(remainingLabel)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.94))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -455,7 +441,7 @@ struct CodexCompactPaceWing: View {
 
     var body: some View {
         Text(balanceLabel)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
             .foregroundStyle(balanceColor)
             .monospacedDigit()
             .lineLimit(1)
@@ -542,23 +528,6 @@ private enum CodexQuotaPresentation {
         case .deficit:
             return pace.deficitPercent <= 15 ? .yellow : .red
         }
-    }
-}
-
-private struct CodexRefreshIndicator: View {
-    let isRefreshing: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-            .font(.body.weight(.medium))
-            .rotationEffect(.degrees(isRefreshing && !reduceMotion ? 360 : 0))
-            .animation(
-                reduceMotion ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false),
-                value: isRefreshing
-            )
-        .frame(width: 18, height: 18)
-        .accessibilityHidden(true)
     }
 }
 
