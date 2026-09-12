@@ -208,6 +208,7 @@ class BoringViewModel: NSObject, ObservableObject {
         automaticTabCancellable = MusicManager.shared.$isPlaying
             .dropFirst()
             .removeDuplicates()
+            .prefix(1)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isPlaying in
                 guard let self, self.notchState == .open else { return }
