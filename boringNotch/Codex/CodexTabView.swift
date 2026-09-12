@@ -46,13 +46,7 @@ struct CodexTabView: View {
             Button {
                 manager.refreshNow()
             } label: {
-                Image(systemName: manager.isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                    .rotationEffect(.degrees(manager.isRefreshing ? 360 : 0))
-                    .animation(
-                        .linear(duration: 0.9).repeatForever(autoreverses: false),
-                        value: manager.isRefreshing
-                    )
-                    .font(.headline)
+                CodexRefreshIndicator(isRefreshing: manager.isRefreshing)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -258,12 +252,7 @@ struct CodexTabView: View {
             }
             Spacer(minLength: 0)
             Button(action: action) {
-                Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                    .rotationEffect(.degrees(isRefreshing ? 360 : 0))
-                    .animation(
-                        .linear(duration: 0.9).repeatForever(autoreverses: false),
-                        value: isRefreshing
-                    )
+                CodexRefreshIndicator(isRefreshing: isRefreshing)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -357,6 +346,24 @@ struct CodexTabView: View {
             result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
         }
         return result
+    }
+}
+
+private struct CodexRefreshIndicator: View {
+    let isRefreshing: Bool
+
+    var body: some View {
+        Group {
+            if isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(.body.weight(.medium))
+            }
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
     }
 }
 

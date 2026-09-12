@@ -88,6 +88,13 @@ private struct ScrollMonitor: NSViewRepresentable {
             removeMonitor()
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self, weak view] event in
                 guard let self = self, event.window === view?.window else { return event }
+                // A local monitor receives every scroll event in the window, not just
+                // events over the SwiftUI view that installed it. Keep the close/open
+                // gesture scoped to that view so an embedded ScrollView can consume
+                // its own vertical scrolling without also minimizing the notch.
+                guard let view,
+                      view.bounds.contains(view.convert(event.locationInWindow, from: nil))
+                else { return event }
                 self.handleScroll(event)
                 return event
             }
