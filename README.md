@@ -1,9 +1,9 @@
-# Boring Notch Quota
+# Notch Quota
 
 ![macOS](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)
 ![License](https://img.shields.io/badge/license-GPLv3-blue)
 
-Boring Notch with one focused addition: a native **Codex** tab beside Home and Shelf.
+Notch with one focused addition: a native **Codex** tab beside Home and Shelf.
 
 The tab keeps quota information easy to scan without pulling in task names, agent activity, approvals, or hooks. It is a small, local-first surface for understanding how much of each reset window is used and how much remains.
 
@@ -36,7 +36,7 @@ cd boring-notch-quota
 open boringNotch.xcodeproj
 ```
 
-The Codex tab needs the local Codex app/CLI to provide official rate-limit data. If Codex is unavailable, the rest of Boring Notch continues to work and the tab explains what is unavailable.
+The Codex tab needs the local Codex app/CLI to provide official rate-limit data. If Codex is unavailable, the rest of Notch continues to work and the tab explains what is unavailable.
 
 ## Privacy boundary
 

@@ -31,7 +31,7 @@ struct DynamicNotchApp: App {
         // The notch is the app's only persistent surface. Keep the legacy
         // menu scene uninserted so no menu-bar icon can reappear from saved
         // preferences or a prior installation.
-        MenuBarExtra("boring.notch", systemImage: "sparkle", isInserted: .constant(false)) {
+        MenuBarExtra("Notch", systemImage: "sparkle", isInserted: .constant(false)) {
             Button("Settings") {
                 DispatchQueue.main.async {
                     SettingsWindowController.shared.showWindow()
@@ -40,7 +40,7 @@ struct DynamicNotchApp: App {
             .keyboardShortcut(KeyEquivalent(","), modifiers: .command)
             CheckForUpdatesView(updater: updaterController.updater)
             Divider()
-            Button("Restart Boring Notch") {
+            Button("Restart Notch") {
                 ApplicationRelauncher.restart()
             }
             Button("Quit", role: .destructive) {

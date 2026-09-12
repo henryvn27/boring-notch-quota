@@ -9,7 +9,7 @@ enum CodexExecutableLocatorError: LocalizedError, Equatable {
   case notFound
 
   var errorDescription: String? {
-    "Codex is installed, but boring.notch could not locate a working Codex executable."
+    "Codex is installed, but Notch could not locate a working Codex executable."
   }
 }
 

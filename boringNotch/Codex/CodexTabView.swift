@@ -248,7 +248,7 @@ struct CodexTabView: View {
                 loadingRow("Loading third-party forecast…")
             }
 
-            Text("Third-party data shown as provided. It is not Boring Notch data or a Boring Notch estimate, and Boring Notch does not warrant it.")
+            Text("Third-party data shown as provided. It is not Notch data or a Notch estimate, and Notch does not warrant it.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -17,7 +17,7 @@ enum CodexUsageServiceError: LocalizedError, Equatable {
     switch self {
     case .processFailed: "Codex stopped before returning usage."
     case .malformedResponse: "Codex returned an unreadable usage response."
-    case .responseTooLarge: "Codex returned more usage data than boring.notch accepts."
+    case .responseTooLarge: "Codex returned more usage data than Notch accepts."
     case .unavailable(let message): message ?? "Codex usage is unavailable."
     }
   }
@@ -133,7 +133,7 @@ struct CodexUsageService: CodexUsageFetching, Sendable {
             "id": 0,
             "params": [
               "clientInfo": [
-                "name": "boring-notch-quota", "title": "Boring Notch Quota", "version": appVersion,
+                "name": "notch-quota", "title": "Notch Quota", "version": appVersion,
               ]
             ],
           ]))
