@@ -113,6 +113,16 @@ class BoringViewCoordinator: ObservableObject {
     private var hudReplacementCancellable: AnyCancellable?
 
     private init() {
+        // Apply the default at the point where the coordinator is guaranteed
+        // to be initialized. This also upgrades existing installs that still
+        // have the old `false` value without changing the setting again after
+        // the user makes a deliberate choice.
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "didApplyDefaultExperience_v6") == nil {
+            defaults.set(true, forKey: "openLastTabByDefault")
+            defaults.set(true, forKey: "didApplyDefaultExperience_v6")
+        }
+
         // Perform migration from name-based to UUID-based storage
         if preferredScreenUUID == nil, let legacyName = legacyPreferredScreenName {
             // Try to find screen by name and migrate to UUID
