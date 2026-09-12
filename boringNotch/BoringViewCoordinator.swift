@@ -319,6 +319,12 @@ class BoringViewCoordinator: ObservableObject {
         currentView = .home
     }
 
+    func selectTab(_ view: NotchViews) {
+        currentView = view
+        lastNotchTabRawValue = view.rawValue
+        lastNotchTabWasUserSelected = true
+    }
+
     /// Select the tab to show when the notch opens.
     ///
     /// A tab chosen by the user is remembered when that preference is enabled.
