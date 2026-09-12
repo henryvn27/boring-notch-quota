@@ -43,7 +43,7 @@ jobs:
 
       - name: Package app
         run: |
-          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/boringNotch.app"
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/Notch.app"
           test -d "$APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" boringNotch-unsigned.zip
           shasum -a 256 boringNotch-unsigned.zip | tee boringNotch-unsigned.zip.sha256

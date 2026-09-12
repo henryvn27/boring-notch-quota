@@ -426,10 +426,10 @@ jobs:
             end
             auto_updates true
             depends_on macos: :sonoma
-            app "boringNotch.app"
+            app "Notch.app"
             
             postflight do
-              app_path = appdir/"boringNotch.app"
+              app_path = appdir/"Notch.app"
               next unless app_path.exist?
               system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", app_path]
             end
