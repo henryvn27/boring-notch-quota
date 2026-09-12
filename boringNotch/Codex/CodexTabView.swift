@@ -554,12 +554,15 @@ private struct CodexQuotaMeter: View {
     let expectedPercent: Double?
 
     var body: some View {
-        ZStack {
-            ProgressView(value: displayedPercent, total: 100)
-                .progressViewStyle(.linear)
-                .tint(.accentColor)
-            if let expectedPercent {
-                GeometryReader { geometry in
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.primary.opacity(0.16))
+                Capsule()
+                    .fill(.accentColor)
+                    .frame(width: geometry.size.width * fraction(displayedPercent))
+
+                if let expectedPercent {
                     Capsule()
                         .fill(.primary.opacity(0.78))
                         .frame(width: 2, height: 8)
@@ -568,7 +571,6 @@ private struct CodexQuotaMeter: View {
                             y: geometry.size.height / 2
                         )
                 }
-                .accessibilityHidden(true)
             }
         }
         .frame(height: 8)
