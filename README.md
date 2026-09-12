@@ -21,7 +21,7 @@ approvals, or hooks.
 - 5-hour and weekly windows with remaining percentage and a proportional usage meter.
 - A pace comparison showing whether usage is ahead of or behind the time left in the reset window.
 - Reset timing and a plain-language “runs out” estimate.
-- A read-only API-price equivalent based on local Codex session logs, with in-notch daily and model breakdowns.
+- A read-only API-price equivalent based on local Codex session logs.
 - An unofficial reset forecast, clearly marked as third-party information.
 - Freshness, partial-data, and estimate-only labels so the display never pretends to be a bill or an official forecast.
 
