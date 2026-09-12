@@ -500,6 +500,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Defaults[.showOnAllDisplays] = true
             Defaults[.didApplyDefaultExperienceV5] = true
         }
+
+        // Remembering the last tab is the useful default for both new and
+        // existing installs. The versioned migration keeps a deliberate user
+        // choice intact after this first application.
+        if !Defaults[.didApplyDefaultExperienceV6] {
+            UserDefaults.standard.set(true, forKey: "openLastTabByDefault")
+            Defaults[.didApplyDefaultExperienceV6] = true
+        }
     }
 
     func playWelcomeSound() {

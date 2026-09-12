@@ -228,6 +228,7 @@ extension Defaults.Keys {
     static let didApplyDefaultExperienceV3 = Key<Bool>("didApplyDefaultExperience_v3", default: false)
     static let didApplyDefaultExperienceV4 = Key<Bool>("didApplyDefaultExperience_v4", default: false)
     static let didApplyDefaultExperienceV5 = Key<Bool>("didApplyDefaultExperience_v5", default: false)
+    static let didApplyDefaultExperienceV6 = Key<Bool>("didApplyDefaultExperience_v6", default: false)
     
     // Helper to determine the default media controller based on NowPlaying deprecation status
     static var defaultMediaController: MediaControllerType {

@@ -50,7 +50,18 @@ struct ExpandedItem {
 class BoringViewCoordinator: ObservableObject {
     static let shared = BoringViewCoordinator()
 
-    @Published var currentView: NotchViews = .home
+    private var applyingAutomaticView = false
+
+    @AppStorage("lastNotchTab") private var lastNotchTabRawValue: String = ""
+    @AppStorage("lastNotchTabWasUserSelected") private var lastNotchTabWasUserSelected: Bool = false
+
+    @Published var currentView: NotchViews = .home {
+        didSet {
+            guard !applyingAutomaticView else { return }
+            lastNotchTabRawValue = currentView.rawValue
+            lastNotchTabWasUserSelected = true
+        }
+    }
     @Published var helloAnimationRunning: Bool = false
     private var sneakPeekDispatch: DispatchWorkItem?
     private var expandingViewDispatch: DispatchWorkItem?
@@ -72,7 +83,7 @@ class BoringViewCoordinator: ObservableObject {
         }
     }
 
-    @AppStorage("openLastTabByDefault") var openLastTabByDefault: Bool = false {
+    @AppStorage("openLastTabByDefault") var openLastTabByDefault: Bool = true {
         didSet {
             if openLastTabByDefault {
                 alwaysShowTabs = true
@@ -296,5 +307,24 @@ class BoringViewCoordinator: ObservableObject {
     
     func showEmpty() {
         currentView = .home
+    }
+
+    /// Select the tab to show when the notch opens.
+    ///
+    /// A tab chosen by the user is remembered when that preference is enabled.
+    /// Until then, opening follows the media-aware default: Home while audio is
+    /// playing and Codex when the player is idle.
+    func prepareViewForOpening(isPlaying: Bool) {
+        if openLastTabByDefault,
+           lastNotchTabWasUserSelected,
+           let rememberedTab = NotchViews(rawValue: lastNotchTabRawValue)
+        {
+            currentView = rememberedTab
+            return
+        }
+
+        applyingAutomaticView = true
+        currentView = isPlaying ? .home : .codex
+        applyingAutomaticView = false
     }
 }
