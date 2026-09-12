@@ -335,7 +335,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             var index = start + marker.count
             skipWhitespace(in: bytes, index: &index)
             if index < bytes.count, bytes[index] == 0x3A {
-                return index + 1
+                return index
             }
         }
         return nil
