@@ -9,6 +9,14 @@ import Combine
 import Defaults
 import SwiftUI
 
+enum NotchMotion {
+    // A short, critically damped spring keeps the Dynamic Island-style lift
+    // without the overshoot that made the previous pop feel rubbery.
+    static let open = Animation.spring(response: 0.36, dampingFraction: 0.92, blendDuration: 0)
+    static let close = Animation.easeOut(duration: 0.18)
+    static let gesture = Animation.interactiveSpring(response: 0.34, dampingFraction: 0.88, blendDuration: 0)
+}
+
 class BoringViewModel: NSObject, ObservableObject {
     @ObservedObject var coordinator = BoringViewCoordinator.shared
     @ObservedObject var detector = FullscreenMediaDetector.shared
@@ -190,8 +198,10 @@ class BoringViewModel: NSObject, ObservableObject {
     }
 
     func open() {
-        self.notchSize = openNotchSize
-        self.notchState = .open
+        withAnimation(NotchMotion.open) {
+            self.notchSize = openNotchSize
+            self.notchState = .open
+        }
         
         // Force music information update when notch is opened
         MusicManager.shared.forceUpdate()
@@ -202,12 +212,14 @@ class BoringViewModel: NSObject, ObservableObject {
         if SharingStateManager.shared.preventNotchClose {
             return
         }
-        self.notchSize = getClosedNotchSize(screenUUID: self.screenUUID)
-        self.closedNotchSize = self.notchSize
-        self.notchState = .closed
-        self.isBatteryPopoverActive = false
-        self.coordinator.sneakPeek.show = false
-        self.edgeAutoOpenActive = false
+        withAnimation(NotchMotion.close) {
+            self.notchSize = getClosedNotchSize(screenUUID: self.screenUUID)
+            self.closedNotchSize = self.notchSize
+            self.notchState = .closed
+            self.isBatteryPopoverActive = false
+            self.coordinator.sneakPeek.show = false
+            self.edgeAutoOpenActive = false
+        }
 
         // Set the current view to shelf if it contains files and the user enables openShelfByDefault
         // Otherwise, if the user has not enabled openLastShelfByDefault, set the view to home

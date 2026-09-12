@@ -9,6 +9,7 @@ import AVFoundation
 import Combine
 import Defaults
 import KeyboardShortcuts
+import LaunchAtLogin
 import Sparkle
 import SwiftUI
 
@@ -284,6 +285,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
 
+        applyDefaultExperience()
+
         // Codex quota is read-only app-server data; no hooks or activity observers are installed.
         CodexUsageManager.shared.start()
 
@@ -442,6 +445,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         previousScreens = NSScreen.screens
+    }
+
+    private func applyDefaultExperience() {
+        guard !Defaults[.didApplyDefaultExperienceV2] else { return }
+
+        // Apply these only once so a user can turn them off later without the
+        // next launch silently changing their choice back.
+        if !LaunchAtLogin.isEnabled {
+            LaunchAtLogin.isEnabled = true
+        }
+        Defaults[.showOnLockScreen] = true
+        Defaults[.didApplyDefaultExperienceV2] = true
     }
 
     func playWelcomeSound() {

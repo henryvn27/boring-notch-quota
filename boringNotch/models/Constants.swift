@@ -68,6 +68,34 @@ enum OptionKeyAction: String, CaseIterable, Identifiable, Defaults.Serializable 
     var id: String { self.rawValue }
 }
 
+// What should own the compact closed-notch surface while media is playing.
+// Usage-first keeps the Codex quota and pace visible; music-first gives the
+// center to the player while retaining the pace signal in the right wing.
+enum CodexClosedContentMode: String, CaseIterable, Codable, Defaults.Serializable, Identifiable, Sendable {
+    case music
+    case usage
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .music:
+            return "Music first"
+        case .usage:
+            return "Usage first"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .music:
+            return "Music takes the center while the pace signal stays visible."
+        case .usage:
+            return "Codex usage and pace stay visible while music plays."
+        }
+    }
+}
+
 extension Defaults.Keys {
     // MARK: General
     static let showOnAllDisplays = Key<Bool>("showOnAllDisplays", default: false)
@@ -90,7 +118,7 @@ extension Defaults.Keys {
     static let nonNotchHeight = Key<CGFloat>("nonNotchHeight", default: 32)
     static let notchHeight = Key<CGFloat>("notchHeight", default: 32)
     //static let openLastTabByDefault = Key<Bool>("openLastTabByDefault", default: false)
-    static let showOnLockScreen = Key<Bool>("showOnLockScreen", default: false)
+    static let showOnLockScreen = Key<Bool>("showOnLockScreen", default: true)
     static let hideFromScreenRecording = Key<Bool>("hideFromScreenRecording", default: false)
     
     // MARK: Appearance
@@ -128,6 +156,7 @@ extension Defaults.Keys {
     static let codexShowPace = Key<Bool>("codexShowPace", default: true)
     static let codexShowCostEstimate = Key<Bool>("codexShowCostEstimate", default: true)
     static let codexShowResetForecast = Key<Bool>("codexShowResetForecast", default: true)
+    static let codexClosedContentMode = Key<CodexClosedContentMode>("codexClosedContentMode", default: .music)
     
     // MARK: Media playback
     static let coloredSpectrogram = Key<Bool>("coloredSpectrogram", default: true)
@@ -195,6 +224,7 @@ extension Defaults.Keys {
     static let customAccentColorData = Key<Data?>("customAccentColorData", default: nil)
     // Show or hide the title bar
     static let hideTitleBar = Key<Bool>("hideTitleBar", default: true)
+    static let didApplyDefaultExperienceV2 = Key<Bool>("didApplyDefaultExperience_v2", default: false)
     
     // Helper to determine the default media controller based on NowPlaying deprecation status
     static var defaultMediaController: MediaControllerType {

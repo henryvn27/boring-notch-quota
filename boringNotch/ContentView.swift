@@ -37,9 +37,11 @@ struct ContentView: View {
 
     @Default(.showNotHumanFace) var showNotHumanFace
     @Default(.codexShowIdleUsage) private var codexShowIdleUsage
+    @Default(.codexClosedContentMode) private var codexClosedContentMode
 
-    // Shared interactive spring for movement/resizing to avoid conflicting animations
-    private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
+    // Shared interruptible motion for gestures. Open/close itself is owned by
+    // BoringViewModel so keyboard, hover, and swipe paths all feel identical.
+    private let animationSpring = NotchMotion.gesture
 
     private let extendedHoverPadding: CGFloat = 30
     private let zeroHeightHoverPadding: CGFloat = 10
@@ -59,14 +61,23 @@ struct ContentView: View {
         )
     }
 
-    private var shouldDisplayCodexUsageWhenIdle: Bool {
+    private var shouldDisplayCodexUsage: Bool {
         !coordinator.expandingView.show
             && vm.notchState == .closed
-            && !musicManager.isPlaying
-            && musicManager.isPlayerIdle
             && !vm.hideOnClosed
             && !coordinator.sneakPeek.show
             && codexShowIdleUsage
+            && (codexClosedContentMode == .usage
+                || (!musicManager.isPlaying && musicManager.isPlayerIdle))
+    }
+
+    private var shouldDisplayMusicLiveActivity: Bool {
+        (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
+            && vm.notchState == .closed
+            && (musicManager.isPlaying || !musicManager.isPlayerIdle)
+            && coordinator.musicLiveActivityEnabled
+            && !vm.hideOnClosed
+            && codexClosedContentMode == .music
     }
 
     private var computedChinWidth: CGFloat {
@@ -76,13 +87,10 @@ struct ContentView: View {
             && vm.notchState == .closed && Defaults[.showPowerStatusNotifications]
         {
             chinWidth = 640
-        } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
-            && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
-            && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
-        {
-            chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
-        } else if shouldDisplayCodexUsageWhenIdle {
-            chinWidth = max(chinWidth, vm.closedNotchSize.width + CodexIdleUsageLayout.totalWingWidth)
+        } else if shouldDisplayMusicLiveActivity {
+            chinWidth = max(chinWidth, CodexIdleUsageLayout.totalWidth(for: vm.closedNotchSize.width))
+        } else if shouldDisplayCodexUsage {
+            chinWidth = max(chinWidth, CodexIdleUsageLayout.totalWidth(for: vm.closedNotchSize.width))
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -133,11 +141,8 @@ struct ContentView: View {
                 mainLayout
                     .frame(height: vm.notchState == .open ? vm.notchSize.height : nil)
                     .conditionalModifier(true) { view in
-                        let openAnimation = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
-                        let closeAnimation = Animation.spring(response: 0.45, dampingFraction: 1.0, blendDuration: 0)
-                        
                         return view
-                            .animation(vm.notchState == .open ? openAnimation : closeAnimation, value: vm.notchState)
+                            .animation(vm.notchState == .open ? NotchMotion.open : NotchMotion.close, value: vm.notchState)
                             .animation(.smooth, value: gestureProgress)
                     }
                     .contentShape(Rectangle())
@@ -147,9 +152,9 @@ struct ContentView: View {
                     .onTapGesture {
                         doOpen()
                     }
-                    // The open notch owns its vertical content gestures (for example,
-                    // the Codex tab's ScrollView). Install the pull-down opener only
-                    // while the notch is closed so it cannot compete with scrolling.
+                    // The open notch owns its vertical content gestures. Install the
+                    // pull-down opener only while the notch is closed so it cannot
+                    // compete with content interactions.
                     .conditionalModifier(Defaults[.enableGestures] && vm.notchState == .closed) { view in
                         view
                             .panGesture(direction: .down) { translation, phase in
@@ -297,10 +302,10 @@ struct ContentView: View {
                       } else if coordinator.sneakPeek.show && Defaults[.inlineHUD] && (coordinator.sneakPeek.type != .music) && (coordinator.sneakPeek.type != .battery) && vm.notchState == .closed {
                           InlineHUD(type: $coordinator.sneakPeek.type, value: $coordinator.sneakPeek.value, icon: $coordinator.sneakPeek.icon, hoverAnimation: $isHovering, gestureProgress: $gestureProgress)
                               .transition(.opacity)
-                      } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
+                      } else if shouldDisplayMusicLiveActivity {
                           MusicLiveActivity()
                               .frame(alignment: .center)
-                      } else if shouldDisplayCodexUsageWhenIdle {
+                      } else if shouldDisplayCodexUsage {
                           CodexIdleUsageView(
                               notchWidth: vm.closedNotchSize.width,
                               height: vm.effectiveClosedNotchHeight,
@@ -318,11 +323,10 @@ struct ContentView: View {
                                .conditionalModifier(
                                    Defaults[.closeGestureEnabled]
                                        && Defaults[.enableGestures]
-                                       && coordinator.currentView != .codex
                                ) { view in
-                                   // Keep the minimize gesture on the header. The Codex
-                                   // tab owns the vertical content area, so its scroll
-                                   // gestures should never close the notch.
+                                   // Keep the minimize gesture on the header. Content
+                                   // views own the area below it, so vertical scrolling
+                                   // can never close the notch accidentally.
                                    view.panGesture(direction: .up) { translation, phase in
                                        handleUpGesture(translation: translation, phase: phase)
                                    }
@@ -385,10 +389,12 @@ struct ContentView: View {
                     }
                 }
                 .transition(
-                    .scale(scale: 0.8, anchor: .top)
-                    .combined(with: .opacity)
-                    .animation(.smooth(duration: 0.35))
+                    .asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                        removal: .opacity
+                    )
                 )
+                .animation(vm.notchState == .open ? NotchMotion.open : NotchMotion.close, value: vm.notchState)
                 .zIndex(1)
                 .allowsHitTesting(vm.notchState == .open)
                 .opacity(gestureProgress != 0 ? 1.0 - min(abs(gestureProgress) * 0.1, 0.3) : 1.0)
@@ -420,6 +426,8 @@ struct ContentView: View {
 
     @ViewBuilder
     func MusicLiveActivity() -> some View {
+        let compactCenterWidth = CodexIdleUsageLayout.compactCenterWidth(for: vm.closedNotchSize.width)
+
         HStack {
             Image(nsImage: musicManager.albumArt)
                 .resizable()
@@ -477,12 +485,13 @@ struct ContentView: View {
                         && coordinator.expandingView.type == .music
                         && Defaults[.sneakPeekStyles] == .inline)
                         ? 380
-                        : vm.closedNotchSize.width
-                            + -cornerRadiusInsets.closed.top
+                        : compactCenterWidth
                 )
 
             HStack {
-                if useMusicVisualizer {
+                if codexClosedContentMode == .music && Defaults[.codexShowPace] {
+                    CodexCompactPaceWing(height: vm.effectiveClosedNotchHeight)
+                } else if useMusicVisualizer {
                     Rectangle()
                         .fill(
                             Defaults[.coloredSpectrogram]
@@ -501,11 +510,13 @@ struct ContentView: View {
                 }
             }
             .frame(
-                width: max(
-                    0,
-                    vm.effectiveClosedNotchHeight - 12
-                        + gestureProgress / 2
-                ),
+                width: (codexClosedContentMode == .music && Defaults[.codexShowPace])
+                    ? CodexIdleUsageLayout.sideWidth + (CodexIdleUsageLayout.sidePadding * 2)
+                    : max(
+                        0,
+                        vm.effectiveClosedNotchHeight - 12
+                            + gestureProgress / 2
+                    ),
                 height: max(
                     0,
                     vm.effectiveClosedNotchHeight - 12
@@ -536,9 +547,7 @@ struct ContentView: View {
     }
 
     private func doOpen() {
-        withAnimation(animationSpring) {
-            vm.open()
-        }
+        vm.open()
     }
 
     // MARK: - Hover Management

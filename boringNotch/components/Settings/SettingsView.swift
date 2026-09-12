@@ -135,6 +135,7 @@ struct SettingsView: View {
 struct CodexSettings: View {
     @Default(.codexUsageMetric) private var usageMetric
     @Default(.codexPreferredWindow) private var preferredWindow
+    @Default(.codexClosedContentMode) private var closedContentMode
 
     var body: some View {
         Form {
@@ -169,6 +170,17 @@ struct CodexSettings: View {
             }
 
             Section("Closed-notch presentation") {
+                Picker("When music is playing", selection: $closedContentMode) {
+                    ForEach(CodexClosedContentMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(closedContentMode.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Defaults.Toggle(key: .codexShowIdleUsage) {
                     Text("Show usage while idle")
                 }

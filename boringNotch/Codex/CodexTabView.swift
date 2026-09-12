@@ -11,21 +11,22 @@ struct CodexTabView: View {
     @Default(.codexShowResetForecast) private var showResetForecast
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                officialQuotaSection
+        VStack(alignment: .leading, spacing: 8) {
+            header
+
+            HStack(alignment: .top, spacing: 10) {
+                quotaCard
                 if showCostEstimate {
-                    apiCostSection
+                    apiCostCard
                 }
                 if showResetForecast {
-                    forecastSection
+                    forecastCard
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             TimelineView(.periodic(from: .now, by: 30)) { timeline in
@@ -44,12 +45,12 @@ struct CodexTabView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Codex")
-                    .font(.title3.weight(.semibold))
-                Text("Local quota and usage")
-                    .font(.caption)
+                    .font(.headline.weight(.semibold))
+                Text("Local quota, cost, and reset signal")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
@@ -60,32 +61,32 @@ struct CodexTabView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Refresh Codex usage")
-            .accessibilityLabel("Refresh Codex usage")
+            .help("Refresh Codex data")
+            .accessibilityLabel("Refresh Codex data")
         }
     }
 
-    private var officialQuotaSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeading(
-                title: "Codex quota",
-                subtitle: "From the local Codex app",
-                isRefreshing: manager.isOfficialRefreshing,
-                action: { manager.refreshNow() }
-            )
-
+    private var quotaCard: some View {
+        CodexCard(
+            title: "Quota",
+            subtitle: "From the local Codex app",
+            isRefreshing: manager.isOfficialRefreshing,
+            action: { manager.refreshNow() }
+        ) {
             if let snapshot = manager.snapshot {
                 Text(officialFreshness(snapshot))
                     .font(.caption2)
                     .foregroundStyle(manager.usageError == nil ? Color.secondary : Color.orange)
-                ForEach(visibleQuotaLimits(snapshot.limits)) { limit in
+
+                ForEach(Array(visibleQuotaLimits(snapshot.limits).prefix(2))) { limit in
                     quotaWindow(limit, observedAt: snapshot.fetchedAt)
                 }
+
                 if manager.usageError != nil {
-                    Label("Refresh failed · showing the last quota", systemImage: "exclamationmark.circle")
+                    Label("Showing the last quota", systemImage: "exclamationmark.circle")
                         .font(.caption2)
                         .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
                 }
             } else if let error = manager.usageError {
                 unavailableRow(error)
@@ -97,20 +98,17 @@ struct CodexTabView: View {
 
     private func quotaWindow(_ limit: CodexUsageLimit, observedAt: Date) -> some View {
         let pace = showPace
-            ? CodexQuotaPaceCalculator.pace(
-                for: limit,
-                observedAt: observedAt,
-                now: presentationDate
-            )
+            ? CodexQuotaPaceCalculator.pace(for: limit, observedAt: observedAt, now: presentationDate)
             : nil
-        return VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(shortQuotaName(limit.name))
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
-                Spacer(minLength: 4)
-                Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))% \(usageMetric.accessibilityLabel)")
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                Spacer(minLength: 2)
+                Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))%")
+                    .font(.caption.weight(.semibold).monospacedDigit())
             }
 
             CodexQuotaMeter(
@@ -120,165 +118,117 @@ struct CodexTabView: View {
 
             if let pace {
                 Text(CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate))
-                    .font(.caption.weight(.medium).monospacedDigit())
+                    .font(.caption2.weight(.medium).monospacedDigit())
                     .foregroundStyle(CodexQuotaPresentation.paceColor(pace))
                     .lineLimit(1)
             }
             if let resetsAt = limit.resetsAt {
                 Text("Resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(limitAccessibilityLabel(limit, pace: pace))
     }
 
-    private var apiCostSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            sectionHeading(
-                title: "API-price equivalent",
-                subtitle: "This Mac · last 30 days",
-                isRefreshing: manager.isCostRefreshing,
-                action: { manager.refreshNow() }
-            )
-
+    private var apiCostCard: some View {
+        CodexCard(
+            title: "API equivalent",
+            subtitle: "This Mac · 30 days",
+            isRefreshing: manager.isCostRefreshing,
+            action: { manager.refreshNow() }
+        ) {
             if let estimate = manager.costEstimate {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("Reviewed OpenAI rates")
-                        if let pricingAsOf = estimate.measurement.pricingAsOf {
-                            Text("as of \(pricingAsOf.formatted(date: .abbreviated, time: .omitted))")
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                }
+                Text(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))
+                    .font(.title2.weight(.semibold).monospacedDigit())
 
                 Text("Updated \(CodexTimeFormatter.relative(estimate.refreshedAt, from: presentationDate))")
                     .font(.caption2)
                     .foregroundStyle(manager.costError == nil ? Color.secondary : Color.orange)
 
                 if estimate.measurement.partial || estimate.unpricedTokenCount > 0 {
-                    Label("Partial estimate · some local usage was excluded", systemImage: "circle.dashed")
+                    Label("Partial local estimate", systemImage: "circle.dashed")
                         .font(.caption2)
                         .foregroundStyle(.orange)
+                        .lineLimit(1)
                 }
-                if let error = manager.costError {
-                    Label("Refresh failed · showing the last estimate", systemImage: "exclamationmark.circle")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(error)
+
+                if let pricingAsOf = estimate.measurement.pricingAsOf {
+                    Text("OpenAI rates as of \(pricingAsOf.formatted(date: .abbreviated, time: .omitted))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                if let error = manager.costError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
                 }
             } else if let error = manager.costError {
                 unavailableRow(error)
             } else {
-                loadingRow("Reading local token counters…")
+                loadingRow("Reading local cost…")
             }
 
-            Text("Estimate only; not your subscription charge or an actual bill. Tool fees and unsupported models are excluded.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
             Link("OpenAI pricing", destination: URL(string: "https://developers.openai.com/api/docs/models/gpt-5.6-sol")!)
                 .font(.caption2)
         }
     }
 
-    private var forecastSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Unofficial reset forecast")
-                        .font(.subheadline.weight(.semibold))
-                    Link("Will Codex Reset?", destination: CodexResetForecast.sourceURL)
-                        .font(.caption)
-                }
-                Spacer(minLength: 0)
-                if let forecast = manager.forecast {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("\(Int(forecast.score.rounded()))% in the next \(forecast.horizonHours) hours")
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(.primary)
-                        if let label = forecast.verdictLabel {
-                            Text(label)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(forecast.resetAnnounced ? .green : .secondary)
-                        }
-                    }
-                    .multilineTextAlignment(.trailing)
-                }
-                Button {
-                    manager.refreshNow()
-                } label: {
-                    CodexRefreshIndicator(isRefreshing: manager.isForecastRefreshing)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Refresh reset forecast")
-                .accessibilityLabel("Refresh reset forecast")
-            }
-
+    private var forecastCard: some View {
+        CodexCard(
+            title: "Reset forecast",
+            subtitle: "Third-party signal",
+            isRefreshing: manager.isForecastRefreshing,
+            action: { manager.refreshNow() }
+        ) {
             if let forecast = manager.forecast {
-                HStack(spacing: 4) {
-                    if let fetchedAt = forecast.fetchedAt {
-                        Text("Source updated \(CodexTimeFormatter.relative(fetchedAt, from: presentationDate))")
-                    }
-                    if let checkedAt = manager.lastForecastRefresh {
-                        Text("· checked \(CodexTimeFormatter.relative(checkedAt, from: presentationDate))")
-                    }
-                    if forecast.sourceStale {
-                        Text("· stale source")
-                    }
+                Text("\(Int(forecast.score.rounded()))%")
+                    .font(.title2.weight(.semibold).monospacedDigit())
+                Text("in the next \(forecast.horizonHours) hours")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let label = forecast.verdictLabel {
+                    Text(label)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(forecast.resetAnnounced ? .green : .secondary)
+                        .lineLimit(1)
                 }
-                .font(.caption2)
-                .foregroundStyle(manager.forecastError == nil ? Color.secondary : Color.orange)
-                .lineLimit(1)
+
+                if let fetchedAt = forecast.fetchedAt {
+                    Text("Source updated \(CodexTimeFormatter.relative(fetchedAt, from: presentationDate))")
+                        .font(.caption2)
+                        .foregroundStyle(manager.forecastError == nil ? Color.secondary : Color.orange)
+                        .lineLimit(1)
+                }
+                if forecast.sourceStale {
+                    Text("Source is stale")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
             } else if let error = manager.forecastError {
                 unavailableRow(error)
             } else {
-                loadingRow("Loading third-party forecast…")
+                loadingRow("Loading forecast…")
             }
 
-            Text("Third-party data shown as provided. It is not Notch data or a Notch estimate, and Notch does not warrant it.")
+            Spacer(minLength: 0)
+            Link("Will Codex Reset?", destination: CodexResetForecast.sourceURL)
+                .font(.caption2)
+            Text("Third-party data, not a Notch estimate.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Unofficial reset forecast")
-    }
-
-    private func sectionHeading(
-        title: String,
-        subtitle: String,
-        isRefreshing: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            Button(action: action) {
-                CodexRefreshIndicator(isRefreshing: isRefreshing)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("Refresh \(title)")
-        }
     }
 
     private func loadingRow(_ text: String) -> some View {
@@ -286,13 +236,14 @@ struct CodexTabView: View {
             ProgressView().controlSize(.small)
             Text(text)
         }
-        .font(.caption)
+        .font(.caption2)
         .foregroundStyle(.secondary)
+        .lineLimit(2)
     }
 
     private func unavailableRow(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.circle")
-            .font(.caption)
+            .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(2)
     }
@@ -362,10 +313,77 @@ struct CodexTabView: View {
     }
 }
 
+private struct CodexCard<Content: View>: View {
+    let title: String
+    let subtitle: String
+    let isRefreshing: Bool
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    init(
+        title: String,
+        subtitle: String,
+        isRefreshing: Bool,
+        action: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.isRefreshing = isRefreshing
+        self.action = action
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                Button(action: action) {
+                    CodexRefreshIndicator(isRefreshing: isRefreshing)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Refresh \(title)")
+            }
+
+            content()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.055))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+        }
+    }
+}
+
 enum CodexIdleUsageLayout {
-    static let sideWidth: CGFloat = 42
-    static let sidePadding: CGFloat = 6
+    static let sideWidth: CGFloat = 32
+    static let sidePadding: CGFloat = 4
     static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
+
+    static func compactCenterWidth(for notchWidth: CGFloat) -> CGFloat {
+        min(notchWidth, 148)
+    }
+
+    static func totalWidth(for notchWidth: CGFloat) -> CGFloat {
+        compactCenterWidth(for: notchWidth) + totalWingWidth
+    }
 }
 
 struct CodexIdleUsageView: View {
@@ -398,7 +416,7 @@ struct CodexIdleUsageView: View {
         Button(action: action) {
             HStack(spacing: 0) {
                 Text(remainingLabel)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.94))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -406,10 +424,10 @@ struct CodexIdleUsageView: View {
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
 
                 Color.black
-                    .frame(width: notchWidth)
+                    .frame(width: CodexIdleUsageLayout.compactCenterWidth(for: notchWidth))
 
                 Text(balanceLabel)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(balanceColor)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -444,7 +462,7 @@ struct CodexIdleUsageView: View {
     private var balanceLabel: String {
         guard showPace, let pace else { return manager.isRefreshing ? "…" : "—" }
         let points = Int(abs(pace.balancePercent).rounded())
-        return pace.status == .deficit ? "-\(points)%" : "\(points)%"
+        return pace.status == .deficit ? "-\(points)%" : "+\(points)%"
     }
 
     private var balanceColor: Color {
@@ -465,6 +483,71 @@ struct CodexIdleUsageView: View {
             result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
         }
         return result
+    }
+}
+
+/// The pace wing stays available when music owns the closed-notch center.
+/// It intentionally shares the same math, labels, and semantic colors as the
+/// idle Codex readout so switching modes never changes what the number means.
+struct CodexCompactPaceWing: View {
+    @ObservedObject private var manager = CodexUsageManager.shared
+    @Default(.codexPreferredWindow) private var preferredWindow
+    @Default(.codexShowPace) private var showPace
+
+    let height: CGFloat
+    @State private var presentationDate = Date()
+
+    private var limit: CodexUsageLimit? {
+        guard let limits = manager.snapshot?.limits else { return nil }
+        return CodexQuotaPresentation.primaryLimit(from: limits, preferredWindow: preferredWindow)
+    }
+
+    private var pace: CodexQuotaPace? {
+        guard showPace, let limit, let snapshot = manager.snapshot else { return nil }
+        return CodexQuotaPaceCalculator.pace(
+            for: limit,
+            observedAt: snapshot.fetchedAt,
+            now: presentationDate
+        )
+    }
+
+    var body: some View {
+        Text(balanceLabel)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(balanceColor)
+            .monospacedDigit()
+            .lineLimit(1)
+            .frame(width: CodexIdleUsageLayout.sideWidth, height: height, alignment: .leading)
+            .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
+            .onAppear {
+                manager.start()
+            }
+            .background {
+                TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                    Color.clear
+                        .onChange(of: timeline.date) { _, date in
+                            presentationDate = date
+                        }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var balanceLabel: String {
+        guard showPace, let pace else { return manager.isRefreshing ? "…" : "—" }
+        let points = Int(abs(pace.balancePercent).rounded())
+        return pace.status == .deficit ? "-\(points)%" : "+\(points)%"
+    }
+
+    private var balanceColor: Color {
+        guard let pace else { return .secondary }
+        return CodexQuotaPresentation.paceColor(pace)
+    }
+
+    private var accessibilityLabel: String {
+        guard let pace else { return "Codex pace unavailable" }
+        return "Codex pace, " + CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate)
     }
 }
 
