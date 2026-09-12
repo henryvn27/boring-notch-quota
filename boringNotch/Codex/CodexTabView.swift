@@ -12,8 +12,6 @@ struct CodexTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            freshnessBar
-
             HStack(alignment: .top, spacing: 12) {
                 if showCostEstimate {
                     apiCostCard
@@ -44,36 +42,6 @@ struct CodexTabView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Codex quota and usage")
-    }
-
-    private var freshnessBar: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if let latest = latestDataDate {
-                Text("Updated \(CodexTimeFormatter.relative(latest, from: presentationDate))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            Button {
-                manager.refreshNow()
-            } label: {
-                CodexRefreshIndicator(isRefreshing: manager.isRefreshing)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Refresh Codex data")
-            .accessibilityLabel("Refresh Codex data")
-        }
-    }
-
-    private var latestDataDate: Date? {
-        [
-            manager.snapshot?.fetchedAt,
-            manager.costEstimate?.refreshedAt,
-            manager.forecast?.fetchedAt,
-        ]
-        .compactMap { $0 }
-        .max()
     }
 
     private var quotaGraphs: some View {
@@ -182,12 +150,7 @@ struct CodexTabView: View {
     }
 
     private var forecastCard: some View {
-        CodexCard(
-            title: "Reset forecast",
-            subtitle: "Third-party signal",
-            isRefreshing: manager.isForecastRefreshing,
-            action: { manager.refreshNow() }
-        ) {
+        VStack(alignment: .leading, spacing: 2) {
             if let forecast = manager.forecast {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text("\(Int(forecast.score.rounded()))%")
@@ -211,10 +174,10 @@ struct CodexTabView: View {
             } else {
                 loadingRow("Loading forecast…")
             }
-
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Unofficial reset forecast")
+        .accessibilityLabel("Reset forecast")
     }
 
     private func loadingRow(_ text: String) -> some View {
@@ -346,8 +309,10 @@ private struct CodexCard<Content: View>: View {
 }
 
 enum CodexIdleUsageLayout {
-    static let sideWidth: CGFloat = 32
-    static let sidePadding: CGFloat = 4
+    // Leave enough text width for the widest valid pace label ("-100%")
+    // without making the closed notch feel materially wider.
+    static let sideWidth: CGFloat = 38
+    static let sidePadding: CGFloat = 3
     static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
 
     static func compactCenterWidth(for notchWidth: CGFloat) -> CGFloat {
@@ -393,6 +358,8 @@ struct CodexIdleUsageView: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
                     .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .trailing)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
 
@@ -404,6 +371,8 @@ struct CodexIdleUsageView: View {
                     .foregroundStyle(balanceColor)
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
                     .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .leading)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             }
@@ -490,6 +459,8 @@ struct CodexCompactPaceWing: View {
             .foregroundStyle(balanceColor)
             .monospacedDigit()
             .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .allowsTightening(true)
             .frame(width: CodexIdleUsageLayout.sideWidth, height: height, alignment: .leading)
             .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             .onAppear {

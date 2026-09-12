@@ -116,11 +116,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func enableSkyLightOnAllWindows() {
         if Defaults[.showOnAllDisplays] {
             windows.values.forEach { window in
+                NotchSpaceManager.shared.attach(window)
                 if let skyWindow = window as? BoringNotchSkyLightWindow {
                     skyWindow.enableSkyLight()
                 }
             }
         } else {
+            if let window {
+                NotchSpaceManager.shared.attach(window)
+            }
             if let skyWindow = window as? BoringNotchSkyLightWindow {
                 skyWindow.enableSkyLight()
             }
@@ -135,11 +139,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             await MainActor.run {
                 if Defaults[.showOnAllDisplays] {
                     self.windows.values.forEach { window in
+                        NotchSpaceManager.shared.detach(window)
                         if let skyWindow = window as? BoringNotchSkyLightWindow {
                             skyWindow.disableSkyLight()
                         }
                     }
                 } else {
+                    if let window = self.window {
+                        NotchSpaceManager.shared.detach(window)
+                    }
                     if let skyWindow = self.window as? BoringNotchSkyLightWindow {
                         skyWindow.disableSkyLight()
                     }
@@ -154,13 +162,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if shouldCleanupMulti {
             windows.values.forEach { window in
                 window.close()
-                NotchSpaceManager.shared.notchSpace.windows.remove(window)
+                NotchSpaceManager.shared.detach(window)
             }
             windows.removeAll()
             viewModels.removeAll()
         } else if let window = window {
             window.close()
-            NotchSpaceManager.shared.notchSpace.windows.remove(window)
+            NotchSpaceManager.shared.detach(window)
             if let obs = windowScreenDidChangeObserver {
                 NotificationCenter.default.removeObserver(obs)
                 windowScreenDidChangeObserver = nil
@@ -254,7 +262,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         window.orderFrontRegardless()
-        NotchSpaceManager.shared.notchSpace.windows.insert(window)
+        // Normal unlocked windows remain in AppKit's regular Space/window
+        // ordering. The private max-level Space is attached only while the
+        // lock screen is active.
+        if isScreenLocked {
+            NotchSpaceManager.shared.attach(window)
+        }
 
         // Observe when the window's screen changes so we can update drag detectors
         windowScreenDidChangeObserver = NotificationCenter.default.addObserver(
@@ -470,6 +483,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // existing three-second timeout remains the compact default.
         if !Defaults[.didApplyDefaultExperienceV4] {
             UserDefaults.standard.set(true, forKey: "musicLiveActivityEnabled")
+            UserDefaults.standard.set(true, forKey: "showOnAllDisplays")
             Defaults[.showOnAllDisplays] = true
             Defaults[.enableSneakPeek] = true
             Defaults[.sneakPeekStyles] = .standard
@@ -522,7 +536,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             for uuid in windows.keys where !currentScreenUUIDs.contains(uuid) {
                 if let window = windows[uuid] {
                     window.close()
-                    NotchSpaceManager.shared.notchSpace.windows.remove(window)
+                    NotchSpaceManager.shared.detach(window)
                     windows.removeValue(forKey: uuid)
                     viewModels.removeValue(forKey: uuid)
                 }

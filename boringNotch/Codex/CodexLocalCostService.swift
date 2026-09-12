@@ -30,6 +30,13 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
     // generous ceiling and let the deadline be the final safety valve.
     private static let maximumFiles = 1_000
     private static let maximumScanDuration: TimeInterval = 45
+    // Narrow byte markers keep large prompt/tool records out of
+    // JSONSerialization while still accepting compact JSON and pretty output.
+    private static let relevantMarkers: [Data] = [
+        Data(#""token_count""#.utf8),
+        Data(#""turn_context""#.utf8),
+        Data(#""thread_settings_applied""#.utf8),
+    ]
 
     private let roots: [URL]
 
@@ -129,6 +136,13 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 partial = true
                 return
             }
+            // Most Codex records contain large prompts/tool payloads that are
+            // irrelevant to pricing. Avoid JSON-deserializing those lines;
+            // only token counters and the small model-context records can
+            // affect the estimate.
+            guard Self.relevantMarkers.contains(where: { line.range(of: $0) != nil }) else {
+                return
+            }
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                   let payload = object["payload"] as? [String: Any] else {
                 // Codex JSONL includes many non-token records. They are not an error.
@@ -204,10 +218,15 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
 
     private static func model(in payload: [String: Any]) -> String? {
         if let model = payload["model"] as? String, !model.isEmpty { return model }
+        if let modelName = payload["model_name"] as? String, !modelName.isEmpty { return modelName }
         if let settings = payload["thread_settings"] as? [String: Any],
            let model = settings["model"] as? String,
            !model.isEmpty {
             return model
+        }
+        if let info = payload["info"] as? [String: Any] {
+            if let model = info["model"] as? String, !model.isEmpty { return model }
+            if let modelName = info["model_name"] as? String, !modelName.isEmpty { return modelName }
         }
         return nil
     }
@@ -228,12 +247,18 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             }
         }
         switch model {
-        case "gpt-5.6", "gpt-5.6-sol", "gpt-5-codex":
+        // Rates mirror CodexBar's local Codex cost table. Cache writes fall
+        // back to ordinary input pricing for models without a separate rate.
+        case "gpt-5.6", "gpt-5.6-sol":
             return Rates(input: 5, cached: 0.5, cacheWrite: 6.25, output: 30)
         case "gpt-5.6-terra":
-            return Rates(input: 2.5, cached: 0.25, cacheWrite: 3.125, output: 15)
+            return Rates(input: 2, cached: 0.2, cacheWrite: 2.5, output: 12)
         case "gpt-5.6-luna":
-            return Rates(input: 1, cached: 0.1, cacheWrite: 1.25, output: 6)
+            return Rates(input: 0.2, cached: 0.02, cacheWrite: 0.25, output: 1.2)
+        case "gpt-6-astra":
+            return Rates(input: 10, cached: 1, cacheWrite: 12.5, output: 50)
+        case "gpt-5", "gpt-5-codex", "gpt-5.1", "gpt-5.1-codex":
+            return Rates(input: 1.25, cached: 0.125, cacheWrite: 1.25, output: 10)
         default:
             return nil
         }
