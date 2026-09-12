@@ -16,7 +16,7 @@
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://github.com/henryvn27/boring-notch-quota/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/henryvn27/notch/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>B1Y47t8C/v8ImurYA+9arEsuCrpxwJSviekiflMElbI=</string>
 	<key>UTImportedTypeDeclarations</key>
