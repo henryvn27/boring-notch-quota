@@ -175,12 +175,9 @@ struct CodexSettings: View {
                 Defaults.Toggle(key: .codexShowPace) {
                     Text("Show pace tracker")
                 }
-                Defaults.Toggle(key: .codexShowMascot) {
-                    Text("Show Cowlick mascot")
-                }
 
                 Text(
-                    "The pace tracker compares actual usage with the expected usage at this point in the reset window. Deficits are orange; reserve and on-pace states use the secondary color."
+                    "The pace tracker compares actual usage with the expected usage at this point in the reset window. Banked and on-pace states are green; deficits up to 15 percentage points are yellow and larger deficits are red."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

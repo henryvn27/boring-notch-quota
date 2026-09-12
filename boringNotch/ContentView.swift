@@ -82,7 +82,7 @@ struct ContentView: View {
         {
             chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
         } else if shouldDisplayCodexUsageWhenIdle {
-            chinWidth = max(chinWidth, vm.closedNotchSize.width + 238)
+            chinWidth = max(chinWidth, vm.closedNotchSize.width + CodexIdleUsageLayout.totalWingWidth)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed

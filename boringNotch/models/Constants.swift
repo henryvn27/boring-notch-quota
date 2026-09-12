@@ -126,7 +126,6 @@ extension Defaults.Keys {
     static let codexPreferredWindow = Key<CodexQuotaWindowPreference>("codexPreferredWindow", default: .fiveHour)
     static let codexShowIdleUsage = Key<Bool>("codexShowIdleUsage", default: true)
     static let codexShowPace = Key<Bool>("codexShowPace", default: true)
-    static let codexShowMascot = Key<Bool>("codexShowMascot", default: true)
     static let codexShowCostEstimate = Key<Bool>("codexShowCostEstimate", default: true)
     static let codexShowResetForecast = Key<Bool>("codexShowResetForecast", default: true)
     

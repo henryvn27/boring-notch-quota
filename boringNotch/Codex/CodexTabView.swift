@@ -121,7 +121,7 @@ struct CodexTabView: View {
             if let pace {
                 Text(CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate))
                     .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(CodexQuotaPresentation.paceColor(pace.status))
+                    .foregroundStyle(CodexQuotaPresentation.paceColor(pace))
                     .lineLimit(1)
             }
             if let resetsAt = limit.resetsAt {
@@ -362,12 +362,16 @@ struct CodexTabView: View {
     }
 }
 
+enum CodexIdleUsageLayout {
+    static let sideWidth: CGFloat = 42
+    static let sidePadding: CGFloat = 6
+    static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
+}
+
 struct CodexIdleUsageView: View {
     @ObservedObject private var manager = CodexUsageManager.shared
-    @Default(.codexUsageMetric) private var usageMetric
     @Default(.codexPreferredWindow) private var preferredWindow
     @Default(.codexShowPace) private var showPace
-    @Default(.codexShowMascot) private var showMascot
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let notchWidth: CGFloat
@@ -375,8 +379,6 @@ struct CodexIdleUsageView: View {
     let action: () -> Void
 
     @State private var presentationDate = Date()
-
-    private let sideWidth: CGFloat = 110
 
     private var limit: CodexUsageLimit? {
         guard let limits = manager.snapshot?.limits else { return nil }
@@ -395,53 +397,24 @@ struct CodexIdleUsageView: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 0) {
-                HStack(spacing: 5) {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("Codex usage")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .lineLimit(1)
-                        Text(windowLabel)
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .lineLimit(1)
-                    }
-                    CodexIdleMascot(reduceMotion: reduceMotion, isVisible: showMascot)
-                }
-                .frame(width: sideWidth, alignment: .trailing)
-                .padding(.horizontal, 9)
+                Text(remainingLabel)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.94))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .trailing)
+                    .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
 
                 Color.black
                     .frame(width: notchWidth)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    if let limit {
-                        HStack(spacing: 4) {
-                            Image(systemName: "gauge.with.dots.needle.33percent")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.58))
-                            Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))% \(metricSuffix)")
-                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                                .monospacedDigit()
-                        }
-                        if showPace {
-                            Text(compactPaceLabel)
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
-                                .foregroundStyle(pace.map { CodexQuotaPresentation.paceColor($0.status) } ?? .secondary)
-                                .monospacedDigit()
-                        }
-                    } else if manager.isRefreshing {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .tint(.white.opacity(0.72))
-                    } else {
-                        Text("Usage unavailable")
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                }
-                .frame(width: sideWidth, alignment: .leading)
-                .padding(.horizontal, 9)
+                Text(balanceLabel)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(balanceColor)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .leading)
+                    .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             }
             .frame(height: height)
             .contentShape(Rectangle())
@@ -463,43 +436,28 @@ struct CodexIdleUsageView: View {
         .accessibilityHint("Open Codex quota")
     }
 
-    private var windowLabel: String {
-        guard let limit else { return "quota" }
-        if let duration = limit.windowDurationMinutes {
-            switch duration {
-            case 300: return "5-hour"
-            case 10_080: return "Weekly"
-            case let value where value.isMultiple(of: 1_440): return "\(value / 1_440)-day"
-            case let value where value.isMultiple(of: 60): return "\(value / 60)-hour"
-            default: break
-            }
-        }
-        return limit.name.components(separatedBy: " · ").first ?? "quota"
+    private var remainingLabel: String {
+        guard let limit else { return manager.isRefreshing ? "…" : "—" }
+        return "\(Int(limit.remainingPercent.rounded()))%"
     }
 
-    private var metricSuffix: String {
-        usageMetric == .remaining ? "left" : "used"
-    }
-
-    private var compactPaceLabel: String {
-        guard let pace else { return "Pace starting" }
+    private var balanceLabel: String {
+        guard showPace, let pace else { return manager.isRefreshing ? "…" : "—" }
         let points = Int(abs(pace.balancePercent).rounded())
-        switch pace.status {
-        case .reserve:
-            return "+\(points) pp reserve"
-        case .onPace:
-            return "On pace"
-        case .deficit:
-            return "\(points) pp deficit"
-        }
+        return pace.status == .deficit ? "-\(points)%" : "\(points)%"
+    }
+
+    private var balanceColor: Color {
+        guard let pace else { return .secondary }
+        return CodexQuotaPresentation.paceColor(pace)
     }
 
     private var accessibilityLabel: String {
         guard let limit else {
             return manager.isRefreshing ? "Refreshing Codex usage" : "Codex usage unavailable"
         }
-        let percent = Int(limit.displayedPercent(for: usageMetric).rounded())
-        var result = "Codex, \(percent) percent \(usageMetric.accessibilityLabel)"
+        let percent = Int(limit.remainingPercent.rounded())
+        var result = "Codex, \(percent) percent remaining"
         if let pace {
             result += ", " + CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate)
         }
@@ -507,23 +465,6 @@ struct CodexIdleUsageView: View {
             result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
         }
         return result
-    }
-}
-
-private struct CodexIdleMascot: View {
-    let reduceMotion: Bool
-    let isVisible: Bool
-
-    var body: some View {
-        Group {
-            if reduceMotion || !isVisible {
-                Color.clear
-            } else {
-                MinimalFaceFeatures(height: 16, width: 20)
-            }
-        }
-        .frame(width: 20, height: 18)
-        .accessibilityHidden(true)
     }
 }
 
@@ -567,12 +508,12 @@ private enum CodexQuotaPresentation {
         return "\(forecastSummary) · \(balance)"
     }
 
-    static func paceColor(_ status: CodexQuotaPaceStatus) -> Color {
-        switch status {
+    static func paceColor(_ pace: CodexQuotaPace) -> Color {
+        switch pace.status {
         case .reserve, .onPace:
-            return .secondary
+            return .green
         case .deficit:
-            return .orange
+            return pace.deficitPercent <= 15 ? .yellow : .red
         }
     }
 }
