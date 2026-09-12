@@ -346,6 +346,7 @@ struct CodexTabView: View {
 struct CodexIdleUsageView: View {
     @ObservedObject private var manager = CodexUsageManager.shared
     @Default(.codexUsageMetric) private var usageMetric
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let notchWidth: CGFloat
     let height: CGFloat
@@ -372,12 +373,18 @@ struct CodexIdleUsageView: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 0) {
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text("Codex")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    Text(windowLabel)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.55))
+                HStack(spacing: 5) {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Codex usage")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(1)
+                        Text(windowLabel)
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .lineLimit(1)
+                    }
+                    CodexIdleMascot(reduceMotion: reduceMotion)
                 }
                 .frame(width: sideWidth, alignment: .trailing)
                 .padding(.horizontal, 9)
@@ -387,9 +394,14 @@ struct CodexIdleUsageView: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     if let limit {
-                        Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))% \(metricSuffix)")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
+                        HStack(spacing: 4) {
+                            Image(systemName: "gauge.with.dots.needle.33percent")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.58))
+                            Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))% \(metricSuffix)")
+                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                        }
                         Text(compactPaceLabel)
                             .font(.system(size: 9, weight: .medium, design: .rounded))
                             .foregroundStyle(pace.map { CodexQuotaPresentation.paceColor($0.status) } ?? .secondary)
@@ -410,7 +422,7 @@ struct CodexIdleUsageView: View {
             .frame(height: height)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CodexCompactButtonStyle(reduceMotion: reduceMotion))
         .onAppear {
             manager.start()
         }
@@ -474,6 +486,22 @@ struct CodexIdleUsageView: View {
     }
 }
 
+private struct CodexIdleMascot: View {
+    let reduceMotion: Bool
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                Color.clear
+            } else {
+                MinimalFaceFeatures(height: 16, width: 20)
+            }
+        }
+        .frame(width: 20, height: 18)
+        .accessibilityHidden(true)
+    }
+}
+
 private enum CodexQuotaPresentation {
     static func primaryLimit(from limits: [CodexUsageLimit]) -> CodexUsageLimit? {
         let sorted = limits.sorted { ($0.windowDurationMinutes ?? Int.max) < ($1.windowDurationMinutes ?? Int.max) }
@@ -517,19 +545,32 @@ private enum CodexQuotaPresentation {
 
 private struct CodexRefreshIndicator: View {
     let isRefreshing: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Image(systemName: "arrow.clockwise")
-                    .font(.body.weight(.medium))
-            }
-        }
+        Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+            .font(.body.weight(.medium))
+            .rotationEffect(.degrees(isRefreshing && !reduceMotion ? 360 : 0))
+            .animation(
+                reduceMotion ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false),
+                value: isRefreshing
+            )
         .frame(width: 18, height: 18)
         .accessibilityHidden(true)
+    }
+}
+
+private struct CodexCompactButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1, anchor: .top)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(
+                reduceMotion ? nil : .interactiveSpring(response: 0.22, dampingFraction: 1),
+                value: configuration.isPressed
+            )
     }
 }
 
