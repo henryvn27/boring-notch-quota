@@ -11,10 +11,10 @@ struct CodexTabView: View {
     @Default(.codexShowResetForecast) private var showResetForecast
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             header
 
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 7) {
                 quotaCard
                 if showCostEstimate {
                     apiCostCard
@@ -25,8 +25,8 @@ struct CodexTabView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             TimelineView(.periodic(from: .now, by: 30)) { timeline in
@@ -78,8 +78,11 @@ struct CodexTabView: View {
                     .font(.caption2)
                     .foregroundStyle(manager.usageError == nil ? Color.secondary : Color.orange)
 
-                ForEach(Array(visibleQuotaLimits(snapshot.limits).prefix(2))) { limit in
-                    quotaWindow(limit, observedAt: snapshot.fetchedAt)
+                HStack(alignment: .top, spacing: 7) {
+                    ForEach(Array(visibleQuotaLimits(snapshot.limits).prefix(2))) { limit in
+                        quotaWindow(limit, observedAt: snapshot.fetchedAt)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 if manager.usageError != nil {
@@ -104,26 +107,27 @@ struct CodexTabView: View {
         return VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(shortQuotaName(limit.name))
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .lineLimit(1)
-                Spacer(minLength: 2)
+                Spacer(minLength: 1)
                 Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))%")
-                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .font(.caption2.weight(.semibold).monospacedDigit())
             }
 
             CodexQuotaMeter(
                 displayedPercent: limit.displayedPercent(for: usageMetric),
                 expectedPercent: pace?.expectedDisplayedPercent(for: usageMetric)
             )
+            .frame(height: 5)
 
             if let pace {
-                Text(CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate))
+                Text(compactPaceSummary(pace))
                     .font(.caption2.weight(.medium).monospacedDigit())
                     .foregroundStyle(CodexQuotaPresentation.paceColor(pace))
                     .lineLimit(1)
             }
             if let resetsAt = limit.resetsAt {
-                Text("Resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))")
+                Text(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -132,6 +136,18 @@ struct CodexTabView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(limitAccessibilityLabel(limit, pace: pace))
+    }
+
+    private func compactPaceSummary(_ pace: CodexQuotaPace) -> String {
+        let points = Int(abs(pace.balancePercent).rounded())
+        switch pace.status {
+        case .reserve:
+            return "+\(points)% banked"
+        case .onPace:
+            return "On pace"
+        case .deficit:
+            return "-\(points)% deficit"
+        }
     }
 
     private var apiCostCard: some View {
@@ -157,10 +173,10 @@ struct CodexTabView: View {
                 }
 
                 if let pricingAsOf = estimate.measurement.pricingAsOf {
-                    Text("OpenAI rates as of \(pricingAsOf.formatted(date: .abbreviated, time: .omitted))")
+                    Text("Rates as of \(pricingAsOf.formatted(date: .abbreviated, time: .omitted))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
 
                 if let error = manager.costError {
@@ -175,7 +191,6 @@ struct CodexTabView: View {
                 loadingRow("Reading local cost…")
             }
 
-            Spacer(minLength: 0)
             Link("OpenAI pricing", destination: URL(string: "https://developers.openai.com/api/docs/models/gpt-5.6-sol")!)
                 .font(.caption2)
         }
@@ -192,7 +207,7 @@ struct CodexTabView: View {
                 Text("\(Int(forecast.score.rounded()))%")
                     .font(.title2.weight(.semibold).monospacedDigit())
                 Text("in the next \(forecast.horizonHours) hours")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 if let label = forecast.verdictLabel {
@@ -219,13 +234,12 @@ struct CodexTabView: View {
                 loadingRow("Loading forecast…")
             }
 
-            Spacer(minLength: 0)
             Link("Will Codex Reset?", destination: CodexResetForecast.sourceURL)
                 .font(.caption2)
             Text("Third-party data, not a Notch estimate.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(1)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Unofficial reset forecast")
@@ -335,11 +349,11 @@ private struct CodexCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.caption.weight(.semibold))
                         .lineLimit(1)
                     Text(subtitle)
                         .font(.caption2)
@@ -359,7 +373,7 @@ private struct CodexCard<Content: View>: View {
 
             content()
         }
-        .padding(10)
+        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
