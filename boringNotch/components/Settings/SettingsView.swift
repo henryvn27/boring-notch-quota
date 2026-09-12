@@ -51,6 +51,9 @@ struct SettingsView: View {
                 NavigationLink(value: "Shelf") {
                     Label("Shelf", systemImage: "books.vertical")
                 }
+                NavigationLink(value: "Codex") {
+                    Label("Codex", systemImage: "gauge.with.dots.needle.33percent")
+                }
                 NavigationLink(value: "Shortcuts") {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
@@ -85,6 +88,8 @@ struct SettingsView: View {
                     Charge()
                 case "Shelf":
                     Shelf()
+                case "Codex":
+                    CodexSettings()
                 case "Shortcuts":
                     Shortcuts()
                 case "Extensions":
@@ -123,6 +128,37 @@ struct SettingsView: View {
         .id(accentColorUpdateTrigger)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("AccentColorChanged"))) { _ in
             accentColorUpdateTrigger = UUID()
+        }
+    }
+}
+
+struct CodexSettings: View {
+    @Default(.codexUsageMetric) private var usageMetric
+
+    var body: some View {
+        Form {
+            Section("Quota display") {
+                Picker("Primary quota metric", selection: $usageMetric) {
+                    ForEach(CodexUsageMetric.allCases) { metric in
+                        Text(metric.label).tag(metric)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(
+                    "The Codex tab uses this metric for the percentage and the filled portion of each reset-window bar. The marker remains the even-pace expectation for the same window."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section("Pace tracker") {
+                Text(
+                    "The marker compares actual usage with the expected usage at this point in the reset window. Deficits are orange; reserve and on-pace states use the secondary color."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 }

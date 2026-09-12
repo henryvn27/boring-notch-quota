@@ -1,8 +1,10 @@
+import Defaults
 import SwiftUI
 
 struct CodexTabView: View {
     @ObservedObject private var manager = CodexUsageManager.shared
     @State private var presentationDate = Date()
+    @Default(.codexUsageMetric) private var usageMetric
 
     var body: some View {
         ScrollView(.vertical) {
@@ -97,20 +99,19 @@ struct CodexTabView: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text("\(Int(limit.remainingPercent.rounded()))% remaining")
+                Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))% \(usageMetric.accessibilityLabel)")
                     .font(.subheadline.weight(.semibold).monospacedDigit())
             }
 
             CodexQuotaMeter(
-                remainingPercent: limit.remainingPercent,
-                expectedRemainingPercent: pace.map { 100 - $0.expectedUsedPercent },
-                tint: quotaTint(for: pace)
+                displayedPercent: limit.displayedPercent(for: usageMetric),
+                expectedPercent: pace?.expectedDisplayedPercent(for: usageMetric)
             )
 
             if let pace {
-                Text(paceSummary(pace, limit: limit))
+                Text(paceSummary(pace, relativeTo: presentationDate))
                     .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(paceColor(pace, limit: limit))
+                    .foregroundStyle(paceColor(pace.status))
                     .lineLimit(1)
             }
             if let resetsAt = limit.resetsAt {
@@ -201,7 +202,7 @@ struct CodexTabView: View {
                 Button {
                     manager.refreshNow()
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    CodexRefreshIndicator(isRefreshing: manager.isForecastRefreshing)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -306,41 +307,58 @@ struct CodexTabView: View {
         name.components(separatedBy: " · ").first ?? name
     }
 
-    private func paceSummary(_ pace: CodexQuotaPace, limit: CodexUsageLimit) -> String {
+    private func paceSummary(_ pace: CodexQuotaPace, relativeTo referenceDate: Date) -> String {
         let points = Int(abs(pace.balancePercent).rounded())
         let balance: String
-        if points == 0 {
-            balance = "On pace"
-        } else if pace.balancePercent > 0 {
+        switch pace.status {
+        case .reserve:
             balance = "\(points) pp reserve"
-        } else {
+        case .onPace:
+            balance = "On pace"
+        case .deficit:
             balance = "\(points) pp deficit"
         }
-        if let exhaustionAt = pace.exhaustionAt, let resetsAt = limit.resetsAt, exhaustionAt < resetsAt {
-            return "Runs out in \(CodexTimeFormatter.duration(exhaustionAt.timeIntervalSince(presentationDate))) · \(balance)"
+
+        guard let forecast = pace.exhaustionForecast else { return balance }
+        let forecastSummary: String
+        if forecast.willLastThroughReset {
+            forecastSummary = "Should last through reset"
+        } else {
+            let timeToEmpty = forecast.estimatedAt.timeIntervalSince(referenceDate)
+            forecastSummary = timeToEmpty < 60
+                ? "Runs out in under 1m"
+                : "Runs out in \(CodexTimeFormatter.duration(timeToEmpty))"
         }
-        return balance
+        return "\(forecastSummary) · \(balance)"
     }
 
-    private func paceColor(_ pace: CodexQuotaPace, limit: CodexUsageLimit) -> Color {
-        if let exhaustionAt = pace.exhaustionAt, let resetsAt = limit.resetsAt, exhaustionAt < resetsAt {
+    private func paceColor(_ status: CodexQuotaPaceStatus) -> Color {
+        switch status {
+        case .reserve, .onPace:
+            return .secondary
+        case .deficit:
             return .orange
         }
-        return pace.balancePercent < 0 ? .orange : .secondary
-    }
-
-    private func quotaTint(for pace: CodexQuotaPace?) -> Color {
-        guard let pace else { return .white.opacity(0.75) }
-        return pace.balancePercent < 0 ? .orange : .white.opacity(0.75)
     }
 
     private func limitAccessibilityLabel(_ limit: CodexUsageLimit, pace: CodexQuotaPace?) -> String {
-        var result = "\(limit.name), \(Int(limit.remainingPercent.rounded())) percent remaining"
+        let displayed = Int(limit.displayedPercent(for: usageMetric).rounded())
+        var result = "\(limit.name), \(displayed) percent \(usageMetric.accessibilityLabel)"
         if let pace {
             let points = Int(abs(pace.balancePercent).rounded())
-            result += pace.balancePercent < 0
-                ? ", \(points) percentage points behind pace"
-                : ", \(points) percentage points in reserve"
+            switch pace.status {
+            case .reserve:
+                result += ", \(points) percentage points in reserve"
+            case .onPace:
+                result += ", on pace"
+            case .deficit:
+                result += ", \(points) percentage points in deficit"
+            }
+            if let forecast = pace.exhaustionForecast {
+                result += forecast.willLastThroughReset
+                    ? ", should last through reset"
+                    : ", projected to run out before reset"
+            }
         }
         if let resetsAt = limit.resetsAt {
             result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
@@ -368,26 +386,29 @@ private struct CodexRefreshIndicator: View {
 }
 
 private struct CodexQuotaMeter: View {
-    let remainingPercent: Double
-    let expectedRemainingPercent: Double?
-    let tint: Color
+    let displayedPercent: Double
+    let expectedPercent: Double?
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.13))
-                Capsule()
-                    .fill(tint)
-                    .frame(width: geometry.size.width * fraction(remainingPercent))
-                if let expectedRemainingPercent {
+        ZStack {
+            ProgressView(value: displayedPercent, total: 100)
+                .progressViewStyle(.linear)
+                .tint(.accentColor)
+            if let expectedPercent {
+                GeometryReader { geometry in
                     Capsule()
-                        .fill(Color.white.opacity(0.92))
-                        .frame(width: 2, height: 10)
-                        .offset(x: markerPosition(width: geometry.size.width, percent: expectedRemainingPercent))
+                        .fill(.primary.opacity(0.78))
+                        .frame(width: 2, height: 8)
+                        .position(
+                            x: markerPosition(width: geometry.size.width, percent: expectedPercent),
+                            y: geometry.size.height / 2
+                        )
                 }
+                .accessibilityHidden(true)
             }
         }
         .frame(height: 8)
+        .accessibilityLabel("Quota usage")
         .accessibilityHidden(true)
     }
 

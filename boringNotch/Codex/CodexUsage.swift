@@ -1,7 +1,30 @@
 // Portions adapted from Cowlick (MIT).
 // Copyright (c) 2026 Cowlick contributors.
 
+import Defaults
 import Foundation
+
+enum CodexUsageMetric: String, CaseIterable, Codable, Defaults.Serializable, Identifiable, Sendable {
+    case remaining
+    case used
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .remaining: "Remaining"
+        case .used: "Used"
+        }
+    }
+
+    var accessibilityLabel: String { rawValue }
+
+    func displayedPercent(forUsedPercent usedPercent: Double) -> Double? {
+        guard usedPercent.isFinite else { return nil }
+        let clamped = usedPercent.clamped(to: 0...100)
+        return self == .used ? clamped : 100 - clamped
+    }
+}
 
 struct CodexUsageLimit: Identifiable, Equatable, Sendable {
     let id: String
@@ -11,7 +34,11 @@ struct CodexUsageLimit: Identifiable, Equatable, Sendable {
     let windowDurationMinutes: Int?
 
     var remainingPercent: Double {
-        min(max(100 - usedPercent, 0), 100)
+        displayedPercent(for: .remaining)
+    }
+
+    func displayedPercent(for metric: CodexUsageMetric) -> Double {
+        metric.displayedPercent(forUsedPercent: usedPercent) ?? 0
     }
 }
 
@@ -23,18 +50,44 @@ struct CodexUsageSnapshot: Equatable, Sendable {
     var primaryLimit: CodexUsageLimit? { limits.first }
 }
 
-struct CodexQuotaPace: Equatable, Sendable {
+enum CodexQuotaPaceStatus: String, Codable, Sendable {
+    case reserve
+    case onPace
+    case deficit
+}
+
+struct CodexQuotaExhaustionForecast: Equatable, Codable, Sendable {
+    let estimatedAt: Date
+    let resetsAt: Date
+
+    var willLastThroughReset: Bool { estimatedAt >= resetsAt }
+}
+
+struct CodexQuotaPace: Equatable, Codable, Sendable {
     let expectedUsedPercent: Double
     let actualUsedPercent: Double
-    /// Positive values mean reserve; negative values mean a deficit against an even pace.
+    /// Positive values are reserve; negative values are deficit.
     let balancePercent: Double
-    let exhaustionAt: Date?
+    let status: CodexQuotaPaceStatus
+    let exhaustionForecast: CodexQuotaExhaustionForecast?
+
+    var reservePercent: Double { max(balancePercent, 0) }
+    var deficitPercent: Double { max(-balancePercent, 0) }
+
+    func expectedDisplayedPercent(for metric: CodexUsageMetric) -> Double {
+        metric.displayedPercent(forUsedPercent: expectedUsedPercent) ?? 0
+    }
 }
 
 enum CodexQuotaPaceCalculator {
     static let minimumElapsedFraction = 0.03
+    static let minimumObservedUsagePercent = 1.0
 
-    static func pace(for limit: CodexUsageLimit, observedAt: Date, now: Date = Date()) -> CodexQuotaPace? {
+    static func pace(
+        for limit: CodexUsageLimit,
+        observedAt: Date? = nil,
+        now: Date = .init()
+    ) -> CodexQuotaPace? {
         guard limit.usedPercent.isFinite,
               let durationMinutes = limit.windowDurationMinutes,
               durationMinutes > 0,
@@ -49,32 +102,56 @@ enum CodexQuotaPaceCalculator {
         let elapsedFraction = (1 - remaining / duration).clamped(to: 0...1)
         guard elapsedFraction >= minimumElapsedFraction else { return nil }
 
-        let actual = limit.usedPercent.clamped(to: 0...100)
         let expected = elapsedFraction * 100
-        let elapsedAtObservation = max(1, observedAt.timeIntervalSince(now) + (duration - remaining))
-        let exhaustionAt: Date?
-        if actual > 0, elapsedAtObservation > 0 {
-            let burnRate = actual / elapsedAtObservation
-            let timeToEmpty = (100 - actual) / burnRate
-            exhaustionAt = timeToEmpty.isFinite && timeToEmpty >= 0
-                ? observedAt.addingTimeInterval(timeToEmpty)
-                : nil
+        let actual = limit.usedPercent.clamped(to: 0...100)
+        let balance = expected - actual
+        let status: CodexQuotaPaceStatus
+        if abs(balance) < 0.000_001 {
+            status = .onPace
+        } else if balance > 0 {
+            status = .reserve
         } else {
-            exhaustionAt = nil
+            status = .deficit
         }
+
+        let observationDate = observedAt ?? now
+        let observedElapsed = duration - resetsAt.timeIntervalSince(observationDate)
+        let exhaustionForecast: CodexQuotaExhaustionForecast? =
+            if actual >= minimumObservedUsagePercent {
+                forecast(
+                    actualUsedPercent: actual,
+                    elapsed: observedElapsed,
+                    observedAt: observationDate,
+                    resetsAt: resetsAt
+                )
+            } else {
+                nil
+            }
 
         return CodexQuotaPace(
             expectedUsedPercent: expected,
             actualUsedPercent: actual,
-            balancePercent: expected - actual,
-            exhaustionAt: exhaustionAt
+            balancePercent: balance,
+            status: status,
+            exhaustionForecast: exhaustionForecast
         )
     }
-}
 
-enum CodexUsageMetric: String, Sendable {
-    case remaining
-    case used
+    private static func forecast(
+        actualUsedPercent: Double,
+        elapsed: TimeInterval,
+        observedAt: Date,
+        resetsAt: Date
+    ) -> CodexQuotaExhaustionForecast? {
+        let burnRate = actualUsedPercent / elapsed
+        guard burnRate.isFinite, burnRate > 0 else { return nil }
+        let timeToEmpty = (100 - actualUsedPercent) / burnRate
+        guard timeToEmpty.isFinite, timeToEmpty >= 0 else { return nil }
+        return CodexQuotaExhaustionForecast(
+            estimatedAt: observedAt.addingTimeInterval(timeToEmpty),
+            resetsAt: resetsAt
+        )
+    }
 }
 
 struct CodexCostMeasurement: Equatable, Sendable {
