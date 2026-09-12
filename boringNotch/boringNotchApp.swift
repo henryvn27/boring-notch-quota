@@ -63,6 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var whatsNewWindow: NSWindow?
     var timer: Timer?
     var closeNotchTask: Task<Void, Never>?
+    private var notchSizeCancellables: [ObjectIdentifier: AnyCancellable] = [:]
     private var previousScreens: [NSScreen]?
     private var onboardingWindowController: NSWindowController?
     private var screenLockedObserver: Any?
@@ -166,6 +167,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             windows.removeAll()
             viewModels.removeAll()
+            notchSizeCancellables.values.forEach { $0.cancel() }
+            notchSizeCancellables.removeAll()
         } else if let window = window {
             window.close()
             NotchSpaceManager.shared.detach(window)
@@ -173,6 +176,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NotificationCenter.default.removeObserver(obs)
                 windowScreenDidChangeObserver = nil
             }
+            notchSizeCancellables[ObjectIdentifier(vm)]?.cancel()
+            notchSizeCancellables.removeValue(forKey: ObjectIdentifier(vm))
             self.window = nil
         }
     }
@@ -261,6 +266,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(viewModel)
         )
 
+        let viewModelKey = ObjectIdentifier(viewModel)
+        notchSizeCancellables[viewModelKey]?.cancel()
+        notchSizeCancellables[viewModelKey] = viewModel.$notchSize
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak window, weak viewModel] _ in
+                guard let self, let window, let viewModel else { return }
+                Task { @MainActor in
+                    self.resizeWindow(window, for: viewModel)
+                }
+            }
+
         window.orderFrontRegardless()
         // Normal unlocked windows remain in AppKit's regular Space/window
         // ordering. The private max-level Space is attached only while the
@@ -294,6 +310,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 y: screenFrame.origin.y + screenFrame.height - window.frame.height
             ))
         window.alphaValue = 1
+    }
+
+    @MainActor
+    private func resizeWindow(_ window: NSWindow, for viewModel: BoringViewModel) {
+        guard viewModel.notchState == .open else { return }
+
+        let targetHeight = max(windowSize.height, viewModel.notchSize.height + shadowPadding)
+        guard abs(window.frame.height - targetHeight) > 0.5 else { return }
+
+        let screen = window.screen
+            ?? viewModel.screenUUID.flatMap { NSScreen.screen(withUUID: $0) }
+            ?? NSScreen.main
+        guard let screen else { return }
+
+        let targetFrame = NSRect(
+            x: screen.frame.midX - windowSize.width / 2,
+            y: screen.frame.maxY - targetHeight,
+            width: windowSize.width,
+            height: targetHeight
+        )
+        window.setFrame(targetFrame, display: true, animate: false)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

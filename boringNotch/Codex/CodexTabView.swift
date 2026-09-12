@@ -4,6 +4,7 @@ import SwiftUI
 
 struct CodexTabView: View {
     @ObservedObject private var manager = CodexUsageManager.shared
+    @EnvironmentObject private var viewModel: BoringViewModel
     @State private var presentationDate = Date()
     @Default(.codexUsageMetric) private var usageMetric
     @Default(.codexPreferredWindow) private var preferredWindow
@@ -11,6 +12,12 @@ struct CodexTabView: View {
     @Default(.codexShowCostEstimate) private var showCostEstimate
     @Default(.codexShowResetForecast) private var showResetForecast
     @State private var showingCostDetail = false
+
+    // The compact quota overview fits in the normal Boring Notch height. The
+    // cost detail view intentionally gets a taller surface so the complete
+    // local breakdown is visible at once instead of hiding data behind a
+    // nested scroll view.
+    private static let costDetailNotchHeight: CGFloat = 380
 
     var body: some View {
         Group {
@@ -36,6 +43,16 @@ struct CodexTabView: View {
         .onAppear {
             manager.start()
             manager.refreshNow()
+            updateNotchHeightForCostDetail()
+        }
+        .onChange(of: showingCostDetail) { _, _ in
+            updateNotchHeightForCostDetail()
+        }
+        .onDisappear {
+            guard viewModel.notchState == .open else { return }
+            withAnimation(NotchMotion.open) {
+                viewModel.notchSize = openNotchSize
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(showingCostDetail ? "API equivalent details" : "Codex quota and usage")
@@ -47,11 +64,10 @@ struct CodexTabView: View {
             HStack(alignment: .top, spacing: 12) {
                 if showCostEstimate {
                     apiCostCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
                 }
                 if showResetForecast {
                     forecastCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
 
@@ -156,8 +172,7 @@ struct CodexTabView: View {
         } label: {
             CodexCard(
                 title: "API equivalent",
-                subtitle: "This Mac · 30 days",
-                showsDisclosure: true
+                subtitle: "This Mac · 30 days"
             ) {
                 if let estimate = manager.costEstimate {
                     if estimate.pricedTokenCount > 0 {
@@ -215,20 +230,19 @@ struct CodexTabView: View {
                 .accessibilityLabel("Refresh API equivalent")
             }
 
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 7) {
-                    if let estimate = manager.costEstimate {
-                        costSummary(estimate)
-                        dailyCostBreakdown(estimate)
-                        modelCostBreakdown(estimate)
-                        costCoverageNote(estimate)
-                    } else if let error = manager.costError {
-                        unavailableRow(error)
-                    } else {
-                        loadingRow("Reading local cost…")
-                    }
+            VStack(alignment: .leading, spacing: 7) {
+                if let estimate = manager.costEstimate {
+                    costSummary(estimate)
+                    dailyCostBreakdown(estimate)
+                    modelCostBreakdown(estimate)
+                    costCoverageNote(estimate)
+                } else if let error = manager.costError {
+                    unavailableRow(error)
+                } else {
+                    loadingRow("Reading local cost…")
                 }
             }
+            .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .contain)
@@ -427,12 +441,15 @@ struct CodexTabView: View {
     }
 
     private var forecastCard: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        CodexCard(
+            title: "Chance of reset",
+            subtitle: "Third-party signal"
+        ) {
             if let forecast = manager.forecast {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text("\(Int(forecast.score.rounded()))%")
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                    Text("chance of reset · next \(forecast.horizonHours)h")
+                        .font(.title2.weight(.semibold).monospacedDigit())
+                    Text("next \(forecast.horizonHours)h")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -453,9 +470,21 @@ struct CodexTabView: View {
                 loadingRow("Loading forecast…")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chance of reset")
+    }
+
+    private func updateNotchHeightForCostDetail() {
+        guard viewModel.notchState == .open else { return }
+        let targetHeight = showingCostDetail
+            ? Self.costDetailNotchHeight
+            : openNotchSize.height
+        guard viewModel.notchSize.height != targetHeight else { return }
+
+        withAnimation(NotchMotion.open) {
+            viewModel.notchSize = CGSize(width: openNotchSize.width, height: targetHeight)
+        }
     }
 
     private func loadingRow(_ text: String) -> some View {
@@ -544,42 +573,28 @@ struct CodexTabView: View {
 private struct CodexCard<Content: View>: View {
     let title: String
     let subtitle: String
-    let showsDisclosure: Bool
     @ViewBuilder let content: () -> Content
 
     init(
         title: String,
         subtitle: String,
-        showsDisclosure: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
-        self.showsDisclosure = showsDisclosure
         self.content = content
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.caption.weight(.semibold))
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                if showsDisclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             content()

@@ -46,6 +46,11 @@ struct ContentView: View {
     private let extendedHoverPadding: CGFloat = 30
     private let zeroHeightHoverPadding: CGFloat = 10
 
+    private var contentWindowHeight: CGFloat {
+        guard vm.notchState == .open else { return windowSize.height }
+        return max(windowSize.height, vm.notchSize.height + shadowPadding)
+    }
+
     private var topCornerRadius: CGFloat {
        ((vm.notchState == .open) && Defaults[.cornerRadiusScaling])
                 ? cornerRadiusInsets.opened.top
@@ -218,7 +223,7 @@ struct ContentView: View {
             }
         }
         .padding(.bottom, 8)
-        .frame(maxWidth: windowSize.width, maxHeight: windowSize.height, alignment: .top)
+        .frame(width: windowSize.width, height: contentWindowHeight, alignment: .top)
         .compositingGroup()
         .scaleEffect(
             x: gestureScale,
