@@ -45,6 +45,7 @@ class BoringViewModel: NSObject, ObservableObject {
     @Published var notchSize: CGSize = getClosedNotchSize()
     @Published var closedNotchSize: CGSize = getClosedNotchSize()
     private var automaticTabCancellable: AnyCancellable?
+    private var automaticTabRefreshTask: Task<Void, Never>?
     
     let webcamManager = WebcamManager.shared
     @Published var isCameraExpanded: Bool = false
@@ -55,6 +56,8 @@ class BoringViewModel: NSObject, ObservableObject {
     }
 
     func destroy() {
+        automaticTabCancellable?.cancel()
+        automaticTabRefreshTask?.cancel()
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
     }
@@ -200,6 +203,7 @@ class BoringViewModel: NSObject, ObservableObject {
 
     func open() {
         automaticTabCancellable?.cancel()
+        automaticTabRefreshTask?.cancel()
         coordinator.prepareViewForOpening(isPlaying: MusicManager.shared.isPlaying)
 
         // The cached playback flag can lag behind the active player during
@@ -222,6 +226,27 @@ class BoringViewModel: NSObject, ObservableObject {
         
         // Force music information update when notch is opened
         MusicManager.shared.forceUpdate()
+
+        // The first controller refresh can finish after the open animation,
+        // especially immediately after launch. Give that refresh a short,
+        // bounded window to settle the media-aware default. The coordinator
+        // still preserves an explicit user-selected tab when remembering is on.
+        automaticTabRefreshTask = Task { @MainActor [weak self] in
+            for attempt in 0..<3 {
+                if attempt > 0 {
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+
+                guard !Task.isCancelled, let self, self.notchState == .open else {
+                    return
+                }
+
+                self.coordinator.prepareViewForOpening(isPlaying: MusicManager.shared.isPlaying)
+                if attempt < 2 {
+                    MusicManager.shared.forceUpdate()
+                }
+            }
+        }
     }
 
     func close() {
@@ -231,6 +256,8 @@ class BoringViewModel: NSObject, ObservableObject {
         }
         automaticTabCancellable?.cancel()
         automaticTabCancellable = nil
+        automaticTabRefreshTask?.cancel()
+        automaticTabRefreshTask = nil
         withAnimation(NotchMotion.close) {
             self.notchSize = getClosedNotchSize(screenUUID: self.screenUUID)
             self.closedNotchSize = self.notchSize
