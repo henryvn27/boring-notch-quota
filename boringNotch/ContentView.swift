@@ -134,7 +134,10 @@ struct ContentView: View {
                     .onTapGesture {
                         doOpen()
                     }
-                    .conditionalModifier(Defaults[.enableGestures]) { view in
+                    // The open notch owns its vertical content gestures (for example,
+                    // the Codex tab's ScrollView). Install the pull-down opener only
+                    // while the notch is closed so it cannot compete with scrolling.
+                    .conditionalModifier(Defaults[.enableGestures] && vm.notchState == .closed) { view in
                         view
                             .panGesture(direction: .down) { translation, phase in
                                 handleDownGesture(translation: translation, phase: phase)
