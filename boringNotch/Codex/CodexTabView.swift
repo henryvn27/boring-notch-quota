@@ -311,7 +311,7 @@ private struct CodexCard<Content: View>: View {
 enum CodexIdleUsageLayout {
     // Leave enough text width for the widest valid pace label ("-100%")
     // without making the closed notch feel materially wider.
-    static let sideWidth: CGFloat = 38
+    static let sideWidth: CGFloat = 48
     static let sidePadding: CGFloat = 3
     static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
 
@@ -376,7 +376,7 @@ struct CodexIdleUsageView: View {
                     .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .leading)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             }
-            .frame(height: height)
+            .frame(width: CodexIdleUsageLayout.totalWidth(for: notchWidth), height: height)
             .contentShape(Rectangle())
         }
         .buttonStyle(CodexCompactButtonStyle(reduceMotion: reduceMotion))

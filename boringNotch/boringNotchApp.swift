@@ -490,6 +490,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Defaults[.waitInterval] = 3
             Defaults[.didApplyDefaultExperienceV4] = true
         }
+
+        // Existing installs may already have consumed V4 before the
+        // multi-display default was corrected. Apply that correction once so
+        // the installed app matches the new default without touching it again
+        // after the user makes a deliberate choice later.
+        if !Defaults[.didApplyDefaultExperienceV5] {
+            UserDefaults.standard.set(true, forKey: "showOnAllDisplays")
+            Defaults[.showOnAllDisplays] = true
+            Defaults[.didApplyDefaultExperienceV5] = true
+        }
     }
 
     func playWelcomeSound() {
