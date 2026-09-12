@@ -2,9 +2,14 @@
 
 Thank you for taking the time to contribute! ❤️
 
+Notch is a community fork of [Boring Notch](https://github.com/TheBoredTeam/boring.notch),
+not an official upstream release. Please read [UPSTREAM.md](UPSTREAM.md) before
+proposing changes so that new work preserves the project's attribution and
+does not present inherited Boring Notch code as original Notch work.
+
 These guidelines help streamline the contribution process for everyone involved. By following them, you'll make it easier for maintainers to review your work and collaborate with you effectively.
 
-You can contribute in many ways: writing code, improving documentation, reporting bugs, requesting features, or creating tutorials and blog posts. Every contribution, large or small, helps make Boring Notch better.
+You can contribute in many ways: writing code, improving documentation, reporting bugs, requesting features, or creating tutorials and blog posts. Every contribution, large or small, helps make this fork better while respecting the upstream project.
 
 ## Table of Contents
 
@@ -40,8 +45,8 @@ Please submit all translations to [Crowdin](https://crowdin.com/project/boring-n
 
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/{your-username}/boring.notch.git
-   cd boring.notch
+   git clone https://github.com/{your-username}/notch.git
+   cd notch
    ```
    Replace `{your-username}` with your GitHub username.
 
