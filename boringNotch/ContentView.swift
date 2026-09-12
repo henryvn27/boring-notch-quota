@@ -68,13 +68,13 @@ struct ContentView: View {
             && !coordinator.sneakPeek.show
             && codexShowIdleUsage
             && (codexClosedContentMode == .usage
-                || (!musicManager.isPlaying && musicManager.isPlayerIdle))
+                || !musicManager.isPlaying)
     }
 
     private var shouldDisplayMusicLiveActivity: Bool {
         (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
             && vm.notchState == .closed
-            && (musicManager.isPlaying || !musicManager.isPlayerIdle)
+            && musicManager.isPlaying
             && coordinator.musicLiveActivityEnabled
             && !vm.hideOnClosed
             && codexClosedContentMode == .music

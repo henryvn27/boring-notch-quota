@@ -433,7 +433,7 @@ struct CodexIdleUsageView: View {
         Button(action: action) {
             HStack(spacing: 0) {
                 Text(remainingLabel)
-                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.94))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -444,7 +444,7 @@ struct CodexIdleUsageView: View {
                     .frame(width: CodexIdleUsageLayout.compactCenterWidth(for: notchWidth))
 
                 Text(balanceLabel)
-                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(balanceColor)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -530,7 +530,7 @@ struct CodexCompactPaceWing: View {
 
     var body: some View {
         Text(balanceLabel)
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
             .foregroundStyle(balanceColor)
             .monospacedDigit()
             .lineLimit(1)
