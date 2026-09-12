@@ -460,7 +460,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             )
         }
 
-        private init(input: Int64, cached: Int64, cacheWrite: Int64, output: Int64) {
+        init(input: Int64, cached: Int64, cacheWrite: Int64, output: Int64) {
             self.input = input
             self.cached = cached
             self.cacheWrite = cacheWrite
