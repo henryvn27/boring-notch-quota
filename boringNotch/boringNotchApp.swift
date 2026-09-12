@@ -15,7 +15,6 @@ import SwiftUI
 @main
 struct DynamicNotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @Default(.menubarIcon) var showMenuBarIcon
     @Environment(\.openWindow) var openWindow
 
     let updaterController: SPUStandardUpdaterController
@@ -29,7 +28,10 @@ struct DynamicNotchApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("boring.notch", systemImage: "sparkle", isInserted: $showMenuBarIcon) {
+        // The notch is the app's only persistent surface. Keep the legacy
+        // menu scene uninserted so no menu-bar icon can reappear from saved
+        // preferences or a prior installation.
+        MenuBarExtra("boring.notch", systemImage: "sparkle", isInserted: .constant(false)) {
             Button("Settings") {
                 DispatchQueue.main.async {
                     SettingsWindowController.shared.showWindow()

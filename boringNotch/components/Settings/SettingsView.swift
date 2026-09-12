@@ -188,13 +188,6 @@ struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: Binding(
-                    get: { Defaults[.menubarIcon] },
-                    set: { Defaults[.menubarIcon] = $0 }
-                )) {
-                    Text("Show menu bar icon")
-                }
-                .tint(.effectiveAccent)
                 LaunchAtLogin.Toggle("Launch at login")
                 Defaults.Toggle(key: .showOnAllDisplays) {
                     Text("Show on all displays")
