@@ -171,7 +171,11 @@ struct CodexUsageService: CodexUsageFetching, Sendable {
     showBucketName: Bool
   ) -> CodexUsageLimit {
     let windowName = displayName(minutes: window.windowDurationMins, role: role)
-    let name = showBucketName ? "\(windowName) · \(bucketName)" : windowName
+    // Keep the bucket identity when a legacy response omits the duration. It
+    // lets CodexUsageLimit.standardWindow still recognize names such as
+    // "Codex Weekly" without inventing a 5-hour lane.
+    let includeBucketName = showBucketName || window.windowDurationMins == nil
+    let name = includeBucketName ? "\(windowName) · \(bucketName)" : windowName
     return CodexUsageLimit(
       id: "\(bucketID).\(role)",
       name: name,
