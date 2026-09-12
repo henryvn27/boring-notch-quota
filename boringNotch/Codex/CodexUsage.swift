@@ -171,11 +171,15 @@ struct CodexCostEstimate: Equatable, Sendable {
 
 struct CodexResetForecast: Equatable, Sendable {
     static let sourceName = "Will Codex Reset?"
-    static let sourceURL = URL(string: "https://www.willcodexquotareset.com")!
-    static let endpointURL = URL(string: "https://www.willcodexquotareset.com/api/forecast")!
+    static let sourceURL = URL(string: "https://willcodexreset.com/")!
+    static let endpointURL = URL(string: "https://willcodexreset.com/api/reset-radar")!
 
     let score: Double
     let resetAnnounced: Bool
+    let verdictCode: String?
+    let verdictLabel: String?
+    let horizonHours: Int
+    let sourceStale: Bool
     let fetchedAt: Date?
     let nextRefreshAt: Date?
 }

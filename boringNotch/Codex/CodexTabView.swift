@@ -194,10 +194,17 @@ struct CodexTabView: View {
                 }
                 Spacer(minLength: 0)
                 if let forecast = manager.forecast {
-                    Text(forecast.resetAnnounced ? "Announced" : "\(Int(forecast.score.rounded()))% in the next 48 hours")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(forecast.resetAnnounced ? .green : .primary)
-                        .multilineTextAlignment(.trailing)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("\(Int(forecast.score.rounded()))% in the next \(forecast.horizonHours) hours")
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.primary)
+                        if let label = forecast.verdictLabel {
+                            Text(label)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(forecast.resetAnnounced ? .green : .secondary)
+                        }
+                    }
+                    .multilineTextAlignment(.trailing)
                 }
                 Button {
                     manager.refreshNow()
@@ -217,6 +224,9 @@ struct CodexTabView: View {
                     }
                     if let checkedAt = manager.lastForecastRefresh {
                         Text("· checked \(CodexTimeFormatter.relative(checkedAt, from: presentationDate))")
+                    }
+                    if forecast.sourceStale {
+                        Text("· stale source")
                     }
                 }
                 .font(.caption2)
