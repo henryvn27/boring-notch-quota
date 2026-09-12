@@ -133,25 +133,55 @@ struct SettingsView: View {
 }
 
 struct CodexSettings: View {
+    @ObservedObject private var manager = CodexUsageManager.shared
     @Default(.codexUsageMetric) private var usageMetric
     @Default(.codexPreferredWindow) private var preferredWindow
     @Default(.codexClosedContentMode) private var closedContentMode
 
+    private var availableWindowPreferences: [CodexQuotaWindowPreference] {
+        manager.snapshot?.availableWindowPreferences ?? CodexQuotaWindowPreference.allCases
+    }
+
+    private var windowAvailability: CodexQuotaWindowAvailability {
+        manager.snapshot?.windowAvailability ?? .unknown
+    }
+
     var body: some View {
         Form {
-            Section("Quota window") {
-                Picker("Preferred window", selection: $preferredWindow) {
-                    ForEach(CodexQuotaWindowPreference.allCases) { window in
-                        Text(window.label).tag(window)
+            Section("Account windows") {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: windowAvailability == .weeklyOnly ? "calendar" : "chart.bar.xaxis")
+                        .foregroundStyle(Color.effectiveAccent)
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(windowAvailability.label)
+                            .font(.headline)
+                        Text(windowAvailability.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.segmented)
+            }
 
-                Text(
-                    "The preferred window is shown first in the Codex tab and powers the compact usage view in the closed notch. Both reset windows remain available in the full tab."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Section("Quota window") {
+                if availableWindowPreferences.count > 1 {
+                    Picker("Preferred window", selection: $preferredWindow) {
+                        ForEach(availableWindowPreferences) { window in
+                            Text(window.label).tag(window)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } else if let onlyWindow = availableWindowPreferences.first {
+                    LabeledContent("Preferred window") {
+                        Text(onlyWindow.label)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text("The preferred window is shown first in the Codex tab and powers the compact usage view in the closed notch. The available windows are detected from your Codex account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Quota display") {
@@ -211,6 +241,21 @@ struct CodexSettings: View {
             }
         }
         .navigationTitle("Codex")
+        .onAppear {
+            manager.start()
+            normalizePreferredWindow()
+        }
+        .onChange(of: manager.snapshot) { _, _ in
+            normalizePreferredWindow()
+        }
+    }
+
+    private func normalizePreferredWindow() {
+        guard let snapshot = manager.snapshot,
+              let available = snapshot.availableWindowPreferences.first,
+              !snapshot.availableWindowPreferences.contains(preferredWindow)
+        else { return }
+        preferredWindow = available
     }
 }
 

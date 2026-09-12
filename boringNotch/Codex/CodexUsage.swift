@@ -68,6 +68,29 @@ struct CodexUsageLimit: Identifiable, Equatable, Sendable {
     func displayedPercent(for metric: CodexUsageMetric) -> Double {
         metric.displayedPercent(forUsedPercent: usedPercent) ?? 0
     }
+
+    /// Maps the two standard Codex reset windows even when the API omits a
+    /// duration on a legacy response and leaves only a human-readable name.
+    var standardWindow: CodexQuotaWindowPreference? {
+        if windowDurationMinutes == CodexQuotaWindowPreference.fiveHour.durationMinutes {
+            return .fiveHour
+        }
+        if windowDurationMinutes == CodexQuotaWindowPreference.weekly.durationMinutes {
+            return .weekly
+        }
+
+        let normalizedName = name.lowercased()
+        if normalizedName.contains("5-hour") || normalizedName.contains("5 hour") {
+            return .fiveHour
+        }
+        if normalizedName.contains("weekly")
+            || normalizedName.contains("7-day")
+            || normalizedName.contains("7 day")
+        {
+            return .weekly
+        }
+        return nil
+    }
 }
 
 struct CodexUsageSnapshot: Equatable, Sendable {
@@ -76,6 +99,62 @@ struct CodexUsageSnapshot: Equatable, Sendable {
     let fetchedAt: Date
 
     var primaryLimit: CodexUsageLimit? { limits.first }
+
+    var fiveHourLimit: CodexUsageLimit? {
+        limits.first { $0.standardWindow == .fiveHour }
+    }
+
+    var weeklyLimit: CodexUsageLimit? {
+        limits.first { $0.standardWindow == .weekly }
+    }
+
+    var availableWindowPreferences: [CodexQuotaWindowPreference] {
+        CodexQuotaWindowPreference.allCases.filter { preference in
+            limits.contains { $0.standardWindow == preference }
+        }
+    }
+
+    var windowAvailability: CodexQuotaWindowAvailability {
+        switch (fiveHourLimit != nil, weeklyLimit != nil) {
+        case (false, true): .weeklyOnly
+        case (true, true): .fiveHourAndWeekly
+        case (true, false): .fiveHourOnly
+        case (false, false): .custom
+        }
+    }
+}
+
+enum CodexQuotaWindowAvailability: Equatable, Sendable {
+    case unknown
+    case weeklyOnly
+    case fiveHourAndWeekly
+    case fiveHourOnly
+    case custom
+
+    var label: String {
+        switch self {
+        case .unknown: "Detecting windows…"
+        case .weeklyOnly: "Weekly only"
+        case .fiveHourAndWeekly: "5-hour + weekly"
+        case .fiveHourOnly: "5-hour only"
+        case .custom: "Custom windows"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .unknown:
+            "Notch will use the windows returned by your Codex account."
+        case .weeklyOnly:
+            "This account exposes a weekly reset window. Notch will show and pace that window only."
+        case .fiveHourAndWeekly:
+            "This account exposes both reset windows. Notch will show both and use your preferred one for the compact notch."
+        case .fiveHourOnly:
+            "This account exposes a 5-hour reset window but no weekly window. Notch will show that window only."
+        case .custom:
+            "This account returned a non-standard window. Notch will show the available data without inventing a 5-hour or weekly lane."
+        }
+    }
 }
 
 enum CodexQuotaPaceStatus: String, Codable, Sendable {

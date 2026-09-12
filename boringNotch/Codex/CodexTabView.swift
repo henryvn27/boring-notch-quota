@@ -54,13 +54,26 @@ struct CodexTabView: View {
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
+                Spacer(minLength: 4)
+                if let snapshot = manager.snapshot {
+                    Text(snapshot.windowAvailability.label)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             if let snapshot = manager.snapshot {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(Array(visibleQuotaLimits(snapshot.limits).prefix(2))) { limit in
-                        quotaWindow(limit, observedAt: snapshot.fetchedAt)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                let limits = Array(visibleQuotaLimits(snapshot.limits).prefix(2))
+                if limits.count == 1, let limit = limits.first {
+                    quotaWindow(limit, observedAt: snapshot.fetchedAt)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(limits) { limit in
+                            quotaWindow(limit, observedAt: snapshot.fetchedAt)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
             } else if let error = manager.usageError {
@@ -197,21 +210,30 @@ struct CodexTabView: View {
         var result: [CodexUsageLimit] = []
         let sorted = limits.sorted { ($0.windowDurationMinutes ?? Int.max) < ($1.windowDurationMinutes ?? Int.max) }
 
-        func limit(for durationMinutes: Int) -> CodexUsageLimit? {
-            let candidates = sorted.filter { $0.windowDurationMinutes == durationMinutes }
-            guard durationMinutes == CodexQuotaWindowPreference.weekly.durationMinutes else {
-                return candidates.first
-            }
+        func limit(for preference: CodexQuotaWindowPreference) -> CodexUsageLimit? {
+            let candidates = sorted.filter { $0.standardWindow == preference }
             return candidates.first(where: {
-                !$0.name.localizedCaseInsensitiveContains("spark")
+                preference != .weekly || !$0.name.localizedCaseInsensitiveContains("spark")
             }) ?? candidates.first
         }
 
-        if let preferred = limit(for: preferredWindow.durationMinutes) {
+        let hasFiveHour = sorted.contains { $0.standardWindow == .fiveHour }
+        let hasWeekly = sorted.contains { $0.standardWindow == .weekly }
+
+        // A weekly-only account gets one full-width graph. Do not fill the
+        // second lane with an unrelated bucket or an invented 5-hour value.
+        if hasWeekly && !hasFiveHour, let weekly = limit(for: .weekly) {
+            return [weekly]
+        }
+        if hasFiveHour && !hasWeekly, let fiveHour = limit(for: .fiveHour) {
+            return [fiveHour]
+        }
+
+        if let preferred = limit(for: preferredWindow) {
             result.append(preferred)
         }
         let secondaryWindow: CodexQuotaWindowPreference = preferredWindow == .fiveHour ? .weekly : .fiveHour
-        if let secondary = limit(for: secondaryWindow.durationMinutes), !result.contains(where: { $0.id == secondary.id }) {
+        if let secondary = limit(for: secondaryWindow), !result.contains(where: { $0.id == secondary.id }) {
             result.append(secondary)
         }
         let knownIDs = Set(result.map(\.id))
@@ -491,13 +513,19 @@ private enum CodexQuotaPresentation {
         preferredWindow: CodexQuotaWindowPreference
     ) -> CodexUsageLimit? {
         let sorted = limits.sorted { ($0.windowDurationMinutes ?? Int.max) < ($1.windowDurationMinutes ?? Int.max) }
-        let preferred = sorted.filter { $0.windowDurationMinutes == preferredWindow.durationMinutes }
-        if preferredWindow == .weekly {
-            return preferred.first(where: {
-                !$0.name.localizedCaseInsensitiveContains("spark")
-            }) ?? preferred.first ?? sorted.first
+        let preferred = sorted.filter { $0.standardWindow == preferredWindow }
+        if let preferred = preferred.first(where: {
+            preferredWindow != .weekly || !$0.name.localizedCaseInsensitiveContains("spark")
+        }) {
+            return preferred
         }
-        return preferred.first ?? sorted.first
+        if let weekly = sorted.first(where: {
+            $0.standardWindow == .weekly
+                && !$0.name.localizedCaseInsensitiveContains("spark")
+        }) {
+            return weekly
+        }
+        return sorted.first
     }
 
     static func paceSummary(_ pace: CodexQuotaPace, relativeTo referenceDate: Date) -> String {
