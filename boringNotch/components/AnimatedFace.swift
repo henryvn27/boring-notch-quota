@@ -8,6 +8,7 @@ import SwiftUI
 
 struct MinimalFaceFeatures: View {
     @State private var isBlinking = false
+    @State private var blinkTask: Task<Void, Never>? = nil
     @State var height:CGFloat = 20;
     @State var width:CGFloat = 30;
     
@@ -43,19 +44,42 @@ struct MinimalFaceFeatures: View {
         .onAppear {
             startBlinking()
         }
+        .onDisappear {
+            stopBlinking()
+        }
     }
     
     func startBlinking() {
-        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
-            withAnimation(.spring(duration: 0.2)) {
-                isBlinking = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(duration: 0.2)) {
-                    isBlinking = false
+        if blinkTask != nil { return }
+        blinkTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                if Task.isCancelled { break }
+
+                await MainActor.run {
+                    withAnimation(.spring(duration: 0.2)) {
+                        isBlinking = true
+                    }
+                }
+
+                try? await Task.sleep(for: .milliseconds(100))
+                if Task.isCancelled { break }
+
+                await MainActor.run {
+                    withAnimation(.spring(duration: 0.2)) {
+                        isBlinking = false
+                    }
                 }
             }
+            await MainActor.run {
+                blinkTask = nil
+            }
         }
+    }
+
+    func stopBlinking() {
+        blinkTask?.cancel()
+        blinkTask = nil
     }
 }
 
