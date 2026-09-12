@@ -109,9 +109,9 @@ struct CodexTabView: View {
             )
 
             if let pace {
-                Text(paceSummary(pace, relativeTo: presentationDate))
+                Text(CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate))
                     .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(paceColor(pace.status))
+                    .foregroundStyle(CodexQuotaPresentation.paceColor(pace.status))
                     .lineLimit(1)
             }
             if let resetsAt = limit.resetsAt {
@@ -317,7 +317,170 @@ struct CodexTabView: View {
         name.components(separatedBy: " · ").first ?? name
     }
 
-    private func paceSummary(_ pace: CodexQuotaPace, relativeTo referenceDate: Date) -> String {
+    private func limitAccessibilityLabel(_ limit: CodexUsageLimit, pace: CodexQuotaPace?) -> String {
+        let displayed = Int(limit.displayedPercent(for: usageMetric).rounded())
+        var result = "\(limit.name), \(displayed) percent \(usageMetric.accessibilityLabel)"
+        if let pace {
+            let points = Int(abs(pace.balancePercent).rounded())
+            switch pace.status {
+            case .reserve:
+                result += ", \(points) percentage points in reserve"
+            case .onPace:
+                result += ", on pace"
+            case .deficit:
+                result += ", \(points) percentage points in deficit"
+            }
+            if let forecast = pace.exhaustionForecast {
+                result += forecast.willLastThroughReset
+                    ? ", should last through reset"
+                    : ", projected to run out before reset"
+            }
+        }
+        if let resetsAt = limit.resetsAt {
+            result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
+        }
+        return result
+    }
+}
+
+struct CodexIdleUsageView: View {
+    @ObservedObject private var manager = CodexUsageManager.shared
+    @Default(.codexUsageMetric) private var usageMetric
+
+    let notchWidth: CGFloat
+    let height: CGFloat
+    let action: () -> Void
+
+    @State private var presentationDate = Date()
+
+    private let sideWidth: CGFloat = 110
+
+    private var limit: CodexUsageLimit? {
+        guard let limits = manager.snapshot?.limits else { return nil }
+        return CodexQuotaPresentation.primaryLimit(from: limits)
+    }
+
+    private var pace: CodexQuotaPace? {
+        guard let limit, let snapshot = manager.snapshot else { return nil }
+        return CodexQuotaPaceCalculator.pace(
+            for: limit,
+            observedAt: snapshot.fetchedAt,
+            now: presentationDate
+        )
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) {
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("Codex")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    Text(windowLabel)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .frame(width: sideWidth, alignment: .trailing)
+                .padding(.horizontal, 9)
+
+                Color.black
+                    .frame(width: notchWidth)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    if let limit {
+                        Text("\(Int(limit.displayedPercent(for: usageMetric).rounded()))% \(metricSuffix)")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                        Text(compactPaceLabel)
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(pace.map { CodexQuotaPresentation.paceColor($0.status) } ?? .secondary)
+                            .monospacedDigit()
+                    } else if manager.isRefreshing {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white.opacity(0.72))
+                    } else {
+                        Text("Usage unavailable")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
+                .frame(width: sideWidth, alignment: .leading)
+                .padding(.horizontal, 9)
+            }
+            .frame(height: height)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onAppear {
+            manager.start()
+        }
+        .background {
+            TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                Color.clear
+                    .onChange(of: timeline.date) { _, date in
+                        presentationDate = date
+                    }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Open Codex quota")
+    }
+
+    private var windowLabel: String {
+        guard let limit else { return "quota" }
+        if let duration = limit.windowDurationMinutes {
+            switch duration {
+            case 300: return "5-hour"
+            case 10_080: return "Weekly"
+            case let value where value.isMultiple(of: 1_440): return "\(value / 1_440)-day"
+            case let value where value.isMultiple(of: 60): return "\(value / 60)-hour"
+            default: break
+            }
+        }
+        return limit.name.components(separatedBy: " · ").first ?? "quota"
+    }
+
+    private var metricSuffix: String {
+        usageMetric == .remaining ? "left" : "used"
+    }
+
+    private var compactPaceLabel: String {
+        guard let pace else { return "Pace starting" }
+        let points = Int(abs(pace.balancePercent).rounded())
+        switch pace.status {
+        case .reserve:
+            return "+\(points) pp reserve"
+        case .onPace:
+            return "On pace"
+        case .deficit:
+            return "\(points) pp deficit"
+        }
+    }
+
+    private var accessibilityLabel: String {
+        guard let limit else {
+            return manager.isRefreshing ? "Refreshing Codex usage" : "Codex usage unavailable"
+        }
+        let percent = Int(limit.displayedPercent(for: usageMetric).rounded())
+        var result = "Codex, \(percent) percent \(usageMetric.accessibilityLabel)"
+        if let pace {
+            result += ", " + CodexQuotaPresentation.paceSummary(pace, relativeTo: presentationDate)
+        }
+        if let resetsAt = limit.resetsAt {
+            result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
+        }
+        return result
+    }
+}
+
+private enum CodexQuotaPresentation {
+    static func primaryLimit(from limits: [CodexUsageLimit]) -> CodexUsageLimit? {
+        let sorted = limits.sorted { ($0.windowDurationMinutes ?? Int.max) < ($1.windowDurationMinutes ?? Int.max) }
+        return sorted.first(where: { $0.windowDurationMinutes == 300 }) ?? sorted.first
+    }
+
+    static func paceSummary(_ pace: CodexQuotaPace, relativeTo referenceDate: Date) -> String {
         let points = Int(abs(pace.balancePercent).rounded())
         let balance: String
         switch pace.status {
@@ -342,38 +505,13 @@ struct CodexTabView: View {
         return "\(forecastSummary) · \(balance)"
     }
 
-    private func paceColor(_ status: CodexQuotaPaceStatus) -> Color {
+    static func paceColor(_ status: CodexQuotaPaceStatus) -> Color {
         switch status {
         case .reserve, .onPace:
             return .secondary
         case .deficit:
             return .orange
         }
-    }
-
-    private func limitAccessibilityLabel(_ limit: CodexUsageLimit, pace: CodexQuotaPace?) -> String {
-        let displayed = Int(limit.displayedPercent(for: usageMetric).rounded())
-        var result = "\(limit.name), \(displayed) percent \(usageMetric.accessibilityLabel)"
-        if let pace {
-            let points = Int(abs(pace.balancePercent).rounded())
-            switch pace.status {
-            case .reserve:
-                result += ", \(points) percentage points in reserve"
-            case .onPace:
-                result += ", on pace"
-            case .deficit:
-                result += ", \(points) percentage points in deficit"
-            }
-            if let forecast = pace.exhaustionForecast {
-                result += forecast.willLastThroughReset
-                    ? ", should last through reset"
-                    : ", projected to run out before reset"
-            }
-        }
-        if let resetsAt = limit.resetsAt {
-            result += ", resets in \(CodexTimeFormatter.resetDate(resetsAt, from: presentationDate))"
-        }
-        return result
     }
 }
 
