@@ -47,7 +47,11 @@ struct CodexTabView: View {
                 manager.refreshNow()
             } label: {
                 Image(systemName: manager.isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                    .symbolEffect(.rotate, isActive: manager.isRefreshing)
+                    .rotationEffect(.degrees(manager.isRefreshing ? 360 : 0))
+                    .animation(
+                        .linear(duration: 0.9).repeatForever(autoreverses: false),
+                        value: manager.isRefreshing
+                    )
                     .font(.headline)
             }
             .buttonStyle(.plain)
@@ -255,7 +259,11 @@ struct CodexTabView: View {
             Spacer(minLength: 0)
             Button(action: action) {
                 Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                    .symbolEffect(.rotate, isActive: isRefreshing)
+                    .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                    .animation(
+                        .linear(duration: 0.9).repeatForever(autoreverses: false),
+                        value: isRefreshing
+                    )
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
