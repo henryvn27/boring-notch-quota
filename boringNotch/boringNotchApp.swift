@@ -448,15 +448,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyDefaultExperience() {
-        guard !Defaults[.didApplyDefaultExperienceV2] else { return }
-
-        // Apply these only once so a user can turn them off later without the
-        // next launch silently changing their choice back.
-        if !LaunchAtLogin.isEnabled {
-            LaunchAtLogin.isEnabled = true
+        if !Defaults[.didApplyDefaultExperienceV2] {
+            // Apply the first-run defaults only once so a user can turn them
+            // off later without the next launch silently changing the choice.
+            if !LaunchAtLogin.isEnabled {
+                LaunchAtLogin.isEnabled = true
+            }
+            Defaults[.showOnLockScreen] = true
+            Defaults[.didApplyDefaultExperienceV2] = true
         }
-        Defaults[.showOnLockScreen] = true
-        Defaults[.didApplyDefaultExperienceV2] = true
+
+        // “Porting” maps to Boring Notch's existing multi-display option.
+        // Migrate this once, then leave the setting under user control.
+        if !Defaults[.didApplyDefaultExperienceV3] {
+            Defaults[.showOnAllDisplays] = true
+            Defaults[.didApplyDefaultExperienceV3] = true
+        }
     }
 
     func playWelcomeSound() {

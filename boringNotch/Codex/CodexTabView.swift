@@ -158,8 +158,19 @@ struct CodexTabView: View {
             action: { manager.refreshNow() }
         ) {
             if let estimate = manager.costEstimate {
-                Text(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))
-                    .font(.title2.weight(.semibold).monospacedDigit())
+                if estimate.pricedTokenCount > 0 {
+                    Text(estimate.measurement.amount.formatted(.currency(code: estimate.measurement.currency)))
+                        .font(.title2.weight(.semibold).monospacedDigit())
+                } else {
+                    Text("—")
+                        .font(.title2.weight(.semibold).monospacedDigit())
+                    Text(estimate.unpricedTokenCount > 0
+                        ? "No priced local usage"
+                        : "No local token counters found")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 Text("Updated \(CodexTimeFormatter.relative(estimate.refreshedAt, from: presentationDate))")
                     .font(.caption2)
@@ -373,16 +384,8 @@ private struct CodexCard<Content: View>: View {
 
             content()
         }
-        .padding(8)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.055))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
-        }
     }
 }
 
@@ -392,7 +395,7 @@ enum CodexIdleUsageLayout {
     static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
 
     static func compactCenterWidth(for notchWidth: CGFloat) -> CGFloat {
-        min(notchWidth, 148)
+        notchWidth
     }
 
     static func totalWidth(for notchWidth: CGFloat) -> CGFloat {
