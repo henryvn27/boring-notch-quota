@@ -36,6 +36,7 @@ struct ContentView: View {
     @Default(.useMusicVisualizer) var useMusicVisualizer
 
     @Default(.showNotHumanFace) var showNotHumanFace
+    @Default(.codexShowIdleUsage) private var codexShowIdleUsage
 
     // Shared interactive spring for movement/resizing to avoid conflicting animations
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
@@ -65,6 +66,7 @@ struct ContentView: View {
             && musicManager.isPlayerIdle
             && !vm.hideOnClosed
             && !coordinator.sneakPeek.show
+            && codexShowIdleUsage
     }
 
     private var computedChinWidth: CGFloat {
@@ -313,7 +315,11 @@ struct ContentView: View {
                            BoringHeader()
                                .frame(height: max(24, vm.effectiveClosedNotchHeight))
                                .opacity(gestureProgress != 0 ? 1.0 - min(abs(gestureProgress) * 0.1, 0.3) : 1.0)
-                               .conditionalModifier(Defaults[.closeGestureEnabled] && Defaults[.enableGestures]) { view in
+                               .conditionalModifier(
+                                   Defaults[.closeGestureEnabled]
+                                       && Defaults[.enableGestures]
+                                       && coordinator.currentView != .codex
+                               ) { view in
                                    // Keep the minimize gesture on the header. The Codex
                                    // tab owns the vertical content area, so its scroll
                                    // gestures should never close the notch.

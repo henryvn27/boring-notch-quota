@@ -5,14 +5,22 @@ struct CodexTabView: View {
     @ObservedObject private var manager = CodexUsageManager.shared
     @State private var presentationDate = Date()
     @Default(.codexUsageMetric) private var usageMetric
+    @Default(.codexPreferredWindow) private var preferredWindow
+    @Default(.codexShowPace) private var showPace
+    @Default(.codexShowCostEstimate) private var showCostEstimate
+    @Default(.codexShowResetForecast) private var showResetForecast
 
     var body: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 officialQuotaSection
-                apiCostSection
-                forecastSection
+                if showCostEstimate {
+                    apiCostSection
+                }
+                if showResetForecast {
+                    forecastSection
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -88,11 +96,13 @@ struct CodexTabView: View {
     }
 
     private func quotaWindow(_ limit: CodexUsageLimit, observedAt: Date) -> some View {
-        let pace = CodexQuotaPaceCalculator.pace(
-            for: limit,
-            observedAt: observedAt,
-            now: presentationDate
-        )
+        let pace = showPace
+            ? CodexQuotaPaceCalculator.pace(
+                for: limit,
+                observedAt: observedAt,
+                now: presentationDate
+            )
+            : nil
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(shortQuotaName(limit.name))
@@ -295,14 +305,23 @@ struct CodexTabView: View {
     private func visibleQuotaLimits(_ limits: [CodexUsageLimit]) -> [CodexUsageLimit] {
         var result: [CodexUsageLimit] = []
         let sorted = limits.sorted { ($0.windowDurationMinutes ?? Int.max) < ($1.windowDurationMinutes ?? Int.max) }
-        if let fiveHour = sorted.first(where: { $0.windowDurationMinutes == 300 }) {
-            result.append(fiveHour)
+
+        func limit(for durationMinutes: Int) -> CodexUsageLimit? {
+            let candidates = sorted.filter { $0.windowDurationMinutes == durationMinutes }
+            guard durationMinutes == CodexQuotaWindowPreference.weekly.durationMinutes else {
+                return candidates.first
+            }
+            return candidates.first(where: {
+                !$0.name.localizedCaseInsensitiveContains("spark")
+            }) ?? candidates.first
         }
-        if let weekly = sorted.first(where: {
-            $0.windowDurationMinutes == 10_080
-                && !$0.name.localizedCaseInsensitiveContains("spark")
-        }) ?? sorted.first(where: { $0.windowDurationMinutes == 10_080 }) {
-            result.append(weekly)
+
+        if let preferred = limit(for: preferredWindow.durationMinutes) {
+            result.append(preferred)
+        }
+        let secondaryWindow: CodexQuotaWindowPreference = preferredWindow == .fiveHour ? .weekly : .fiveHour
+        if let secondary = limit(for: secondaryWindow.durationMinutes), !result.contains(where: { $0.id == secondary.id }) {
+            result.append(secondary)
         }
         let knownIDs = Set(result.map(\.id))
         result.append(contentsOf: sorted.filter {
@@ -346,6 +365,9 @@ struct CodexTabView: View {
 struct CodexIdleUsageView: View {
     @ObservedObject private var manager = CodexUsageManager.shared
     @Default(.codexUsageMetric) private var usageMetric
+    @Default(.codexPreferredWindow) private var preferredWindow
+    @Default(.codexShowPace) private var showPace
+    @Default(.codexShowMascot) private var showMascot
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let notchWidth: CGFloat
@@ -358,11 +380,11 @@ struct CodexIdleUsageView: View {
 
     private var limit: CodexUsageLimit? {
         guard let limits = manager.snapshot?.limits else { return nil }
-        return CodexQuotaPresentation.primaryLimit(from: limits)
+        return CodexQuotaPresentation.primaryLimit(from: limits, preferredWindow: preferredWindow)
     }
 
     private var pace: CodexQuotaPace? {
-        guard let limit, let snapshot = manager.snapshot else { return nil }
+        guard showPace, let limit, let snapshot = manager.snapshot else { return nil }
         return CodexQuotaPaceCalculator.pace(
             for: limit,
             observedAt: snapshot.fetchedAt,
@@ -384,7 +406,7 @@ struct CodexIdleUsageView: View {
                             .foregroundStyle(.white.opacity(0.55))
                             .lineLimit(1)
                     }
-                    CodexIdleMascot(reduceMotion: reduceMotion)
+                    CodexIdleMascot(reduceMotion: reduceMotion, isVisible: showMascot)
                 }
                 .frame(width: sideWidth, alignment: .trailing)
                 .padding(.horizontal, 9)
@@ -402,10 +424,12 @@ struct CodexIdleUsageView: View {
                                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                                 .monospacedDigit()
                         }
-                        Text(compactPaceLabel)
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(pace.map { CodexQuotaPresentation.paceColor($0.status) } ?? .secondary)
-                            .monospacedDigit()
+                        if showPace {
+                            Text(compactPaceLabel)
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(pace.map { CodexQuotaPresentation.paceColor($0.status) } ?? .secondary)
+                                .monospacedDigit()
+                        }
                     } else if manager.isRefreshing {
                         ProgressView()
                             .controlSize(.mini)
@@ -488,10 +512,11 @@ struct CodexIdleUsageView: View {
 
 private struct CodexIdleMascot: View {
     let reduceMotion: Bool
+    let isVisible: Bool
 
     var body: some View {
         Group {
-            if reduceMotion {
+            if reduceMotion || !isVisible {
                 Color.clear
             } else {
                 MinimalFaceFeatures(height: 16, width: 20)
@@ -503,9 +528,18 @@ private struct CodexIdleMascot: View {
 }
 
 private enum CodexQuotaPresentation {
-    static func primaryLimit(from limits: [CodexUsageLimit]) -> CodexUsageLimit? {
+    static func primaryLimit(
+        from limits: [CodexUsageLimit],
+        preferredWindow: CodexQuotaWindowPreference
+    ) -> CodexUsageLimit? {
         let sorted = limits.sorted { ($0.windowDurationMinutes ?? Int.max) < ($1.windowDurationMinutes ?? Int.max) }
-        return sorted.first(where: { $0.windowDurationMinutes == 300 }) ?? sorted.first
+        let preferred = sorted.filter { $0.windowDurationMinutes == preferredWindow.durationMinutes }
+        if preferredWindow == .weekly {
+            return preferred.first(where: {
+                !$0.name.localizedCaseInsensitiveContains("spark")
+            }) ?? preferred.first ?? sorted.first
+        }
+        return preferred.first ?? sorted.first
     }
 
     static func paceSummary(_ pace: CodexQuotaPace, relativeTo referenceDate: Date) -> String {

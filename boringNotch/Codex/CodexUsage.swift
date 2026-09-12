@@ -26,6 +26,34 @@ enum CodexUsageMetric: String, CaseIterable, Codable, Defaults.Serializable, Ide
     }
 }
 
+enum CodexQuotaWindowPreference: String, CaseIterable, Codable, Defaults.Serializable, Identifiable, Sendable {
+    case fiveHour
+    case weekly
+
+    var id: String { rawValue }
+
+    var durationMinutes: Int {
+        switch self {
+        case .fiveHour: 300
+        case .weekly: 10_080
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .fiveHour: "5-hour window"
+        case .weekly: "Weekly window"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .fiveHour: "5-hour"
+        case .weekly: "Weekly"
+        }
+    }
+}
+
 struct CodexUsageLimit: Identifiable, Equatable, Sendable {
     let id: String
     let name: String

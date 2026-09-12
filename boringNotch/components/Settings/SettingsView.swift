@@ -134,9 +134,25 @@ struct SettingsView: View {
 
 struct CodexSettings: View {
     @Default(.codexUsageMetric) private var usageMetric
+    @Default(.codexPreferredWindow) private var preferredWindow
 
     var body: some View {
         Form {
+            Section("Quota window") {
+                Picker("Preferred window", selection: $preferredWindow) {
+                    ForEach(CodexQuotaWindowPreference.allCases) { window in
+                        Text(window.label).tag(window)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(
+                    "The preferred window is shown first in the Codex tab and powers the compact usage view in the closed notch. Both reset windows remain available in the full tab."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             Section("Quota display") {
                 Picker("Primary quota metric", selection: $usageMetric) {
                     ForEach(CodexUsageMetric.allCases) { metric in
@@ -152,14 +168,40 @@ struct CodexSettings: View {
                 .foregroundStyle(.secondary)
             }
 
-            Section("Pace tracker") {
+            Section("Closed-notch presentation") {
+                Defaults.Toggle(key: .codexShowIdleUsage) {
+                    Text("Show usage while idle")
+                }
+                Defaults.Toggle(key: .codexShowPace) {
+                    Text("Show pace tracker")
+                }
+                Defaults.Toggle(key: .codexShowMascot) {
+                    Text("Show Cowlick mascot")
+                }
+
                 Text(
-                    "The marker compares actual usage with the expected usage at this point in the reset window. Deficits are orange; reserve and on-pace states use the secondary color."
+                    "The pace tracker compares actual usage with the expected usage at this point in the reset window. Deficits are orange; reserve and on-pace states use the secondary color."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section("Codex tab sections") {
+                Defaults.Toggle(key: .codexShowCostEstimate) {
+                    Text("Show API-price equivalent")
+                }
+                Defaults.Toggle(key: .codexShowResetForecast) {
+                    Text("Show unofficial reset forecast")
+                }
+
+                Text(
+                    "These sections use the same local usage and forecast data as the Codex tab. Turning a section off only changes its presentation."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
         }
+        .navigationTitle("Codex")
     }
 }
 
