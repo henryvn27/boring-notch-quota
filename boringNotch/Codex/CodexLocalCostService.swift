@@ -58,6 +58,16 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             throw CodexLocalCostServiceError.invalidInterval
         }
 
+        // CodexBar is the reference implementation for local Codex history. Its scanner handles
+        // forked/subagent rollouts, model changes, and progressive catch-up; use it when present so
+        // the API-equivalent card agrees with the user's installed CodexBar. The self-contained
+        // scanner below remains the fallback for machines without CodexBar.
+        do {
+            return try await Self.estimateWithCodexBar(interval: interval)
+        } catch {
+            NSLog("CodexBar local cost unavailable; using Notch fallback: %@", error.localizedDescription)
+        }
+
         let deadline = Date().addingTimeInterval(Self.maximumScanDuration)
         let files = discoverFiles(for: interval, deadline: deadline)
         var total = Decimal.zero
@@ -121,6 +131,179 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             modelBreakdown: modelBreakdown,
             refreshedAt: Date()
         )
+    }
+
+    private static func estimateWithCodexBar(interval: DateInterval) async throws -> CodexCostEstimate {
+        guard let executable = codexBarExecutableURL() else {
+            throw CodexLocalCostServiceError.unavailable
+        }
+
+        let dayCount = max(1, Int(ceil(interval.duration / 86_400)))
+        let output = try await runBoundedProcessOperation {
+            let runner = try BoundedProcessRunner(
+                executableURL: executable,
+                arguments: [
+                    "cost",
+                    "--provider", "codex",
+                    "--format", "json",
+                    "--pretty",
+                    "--days", String(dayCount),
+                    "--refresh",
+                ],
+                timeout: 60,
+                maximumOutputSize: 16 * 1_024 * 1_024
+            )
+            defer { runner.stop() }
+            try runner.readToExit()
+            return runner.output
+        }
+
+        let reports = try JSONDecoder().decode([CodexBarReport].self, from: output)
+        guard let report = reports.first(where: { $0.provider == "codex" }) ?? reports.first else {
+            throw CodexLocalCostServiceError.unavailable
+        }
+
+        let totalCost = Decimal(report.last30DaysCostUSD ?? report.totals?.totalCost ?? 0)
+        let totalTokens = max(
+            0,
+            report.last30DaysTokens
+                ?? report.totals?.totalTokens
+                ?? report.daily.reduce(0) { $0 + ($1.totalTokens ?? 0) }
+        )
+
+        let calendar = Calendar.current
+        let startDay = calendar.startOfDay(for: interval.start)
+        let endDay = calendar.startOfDay(for: interval.end)
+        let days = report.daily.compactMap { day -> CodexCostDay? in
+            guard let date = Self.codexBarDate(day.date),
+                  date >= startDay,
+                  date <= endDay
+            else { return nil }
+            let tokens = max(0, day.totalTokens ?? (day.inputTokens ?? 0) + (day.outputTokens ?? 0))
+            return CodexCostDay(
+                date: date,
+                amount: Decimal(day.totalCost ?? 0),
+                pricedTokenCount: tokens,
+                unpricedTokenCount: 0
+            )
+        }.sorted { $0.date > $1.date }
+
+        var modelsByName: [String: CodexBarModelAggregate] = [:]
+        for day in report.daily {
+            guard let date = Self.codexBarDate(day.date), date >= startDay, date <= endDay else { continue }
+            for model in day.modelBreakdowns ?? [] {
+                var aggregate = modelsByName[model.modelName] ?? CodexBarModelAggregate()
+                aggregate.amount += Decimal(model.cost ?? 0)
+                aggregate.pricedTokenCount += max(0, model.totalTokens ?? 0)
+                modelsByName[model.modelName] = aggregate
+            }
+        }
+        let models = modelsByName.map { name, aggregate in
+            CodexCostModel(
+                model: name,
+                amount: aggregate.amount,
+                pricedTokenCount: aggregate.pricedTokenCount,
+                unpricedTokenCount: 0
+            )
+        }.sorted {
+            if $0.amount == $1.amount {
+                return $0.model.localizedStandardCompare($1.model) == .orderedAscending
+            }
+            return $0.amount > $1.amount
+        }
+
+        let coverage = report.coverage
+        let partial = report.historyCoverageIsEstablished == false
+            || (coverage?.estimated ?? 0) > 0
+            || (coverage?.unmetered ?? 0) > 0
+            || (coverage?.unpriced ?? 0) > 0
+        let refreshedAt = Self.codexBarDateTime(report.updatedAt) ?? Date()
+        return CodexCostEstimate(
+            measurement: CodexCostMeasurement(
+                amount: totalCost,
+                currency: report.currencyCode ?? "USD",
+                pricingAsOf: Self.pricingAsOf,
+                interval: interval,
+                partial: partial
+            ),
+            pricedTokenCount: totalTokens,
+            unpricedTokenCount: 0,
+            dailyBreakdown: days,
+            modelBreakdown: models,
+            refreshedAt: refreshedAt
+        )
+    }
+
+    private static func codexBarExecutableURL() -> URL? {
+        let candidates = [
+            "/opt/homebrew/bin/codexbar",
+            "/usr/local/bin/codexbar",
+            "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
+        ]
+        return candidates
+            .map(URL.init(fileURLWithPath:))
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    private static func codexBarDate(_ value: String) -> Date? {
+        let components = value.split(separator: "-").compactMap { Int($0) }
+        guard components.count == 3 else { return nil }
+        var calendar = Calendar.current
+        return calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: components[0],
+            month: components[1],
+            day: components[2]
+        ))
+    }
+
+    private static func codexBarDateTime(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    private struct CodexBarReport: Decodable {
+        let provider: String?
+        let currencyCode: String?
+        let updatedAt: String?
+        let historyCoverageIsEstablished: Bool?
+        let last30DaysTokens: Int64?
+        let last30DaysCostUSD: Double?
+        let coverage: CodexBarCoverage?
+        let totals: CodexBarTotals?
+        let daily: [CodexBarDay]
+    }
+
+    private struct CodexBarCoverage: Decodable {
+        let estimated: Int
+        let unmetered: Int
+        let unpriced: Int
+    }
+
+    private struct CodexBarTotals: Decodable {
+        let totalTokens: Int64?
+        let totalCost: Double?
+    }
+
+    private struct CodexBarDay: Decodable {
+        let date: String
+        let inputTokens: Int64?
+        let outputTokens: Int64?
+        let totalTokens: Int64?
+        let totalCost: Double?
+        let modelBreakdowns: [CodexBarModel]?
+    }
+
+    private struct CodexBarModel: Decodable {
+        let modelName: String
+        let cost: Double?
+        let totalTokens: Int64?
+    }
+
+    private struct CodexBarModelAggregate {
+        var amount: Decimal = .zero
+        var pricedTokenCount: Int64 = 0
     }
 
     private func discoverFiles(for interval: DateInterval, deadline: Date) -> [URL] {
