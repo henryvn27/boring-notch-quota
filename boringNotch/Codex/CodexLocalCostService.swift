@@ -129,6 +129,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var model: String?
         var sawRecord = false
         var partial = false
+        let primaryDateFormatter = ISO8601DateFormatter()
+        primaryDateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackDateFormatter = ISO8601DateFormatter()
 
         func consume(_ line: Data) {
             guard !line.isEmpty else { return }
@@ -143,21 +146,21 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             guard Self.relevantMarkers.contains(where: { line.range(of: $0) != nil }) else {
                 return
             }
-            guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                  let payload = object["payload"] as? [String: Any] else {
-                // Codex JSONL includes many non-token records. They are not an error.
+            guard let parsed = Self.parseRelevantLine(
+                line,
+                primaryDateFormatter: primaryDateFormatter,
+                fallbackDateFormatter: fallbackDateFormatter
+            ) else {
                 return
             }
-            if let candidate = Self.model(in: payload), !candidate.isEmpty {
+            if let candidate = parsed.model, !candidate.isEmpty {
                 model = candidate
             }
-            guard payload["type"] as? String == "token_count",
-                  let info = payload["info"] as? [String: Any],
-                  let counters = TokenCounters(info: info) else {
+            guard let counters = parsed.counters else {
                 return
             }
             sawRecord = true
-            let timestamp = (object["timestamp"] as? String).flatMap(Self.parseDate)
+            let timestamp = parsed.timestamp
             let isInInterval: Bool
             if let timestamp {
                 isInInterval = interval.contains(timestamp)
@@ -183,7 +186,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
 
         do {
             while !Task.isCancelled, Date() < deadline,
-                  let chunk = try handle.read(upToCount: 64 * 1_024), !chunk.isEmpty {
+                  let chunk = try handle.read(upToCount: 1 * 1_024 * 1_024), !chunk.isEmpty {
                 buffer.append(chunk)
                 while let newline = buffer.firstIndex(of: 0x0A) {
                     consume(Data(buffer[..<newline]))
@@ -216,25 +219,143 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         return result
     }
 
-    private static func model(in payload: [String: Any]) -> String? {
-        if let model = payload["model"] as? String, !model.isEmpty { return model }
-        if let modelName = payload["model_name"] as? String, !modelName.isEmpty { return modelName }
-        if let settings = payload["thread_settings"] as? [String: Any],
-           let model = settings["model"] as? String,
-           !model.isEmpty {
-            return model
+    private struct ParsedLine {
+        let model: String?
+        let counters: TokenCounters?
+        let timestamp: Date?
+    }
+
+    /// Parse only the small fields that affect pricing. Codex rollout lines can
+    /// contain very large prompts and tool payloads, so deserializing every
+    /// token row with JSONSerialization makes a month of local history take
+    /// minutes. This deliberately follows the same byte-oriented strategy as
+    /// CodexBar while keeping the scanner self-contained and read-only.
+    private static func parseRelevantLine(
+        _ line: Data,
+        primaryDateFormatter: ISO8601DateFormatter,
+        fallbackDateFormatter: ISO8601DateFormatter
+    ) -> ParsedLine? {
+        let bytes = Array(line)
+        if contains(Array(#""thread_settings_applied""#.utf8), in: bytes)
+            || contains(Array(#""turn_context""#.utf8), in: bytes)
+        {
+            return ParsedLine(
+                model: stringValue(for: "model", in: bytes),
+                counters: nil,
+                timestamp: nil
+            )
         }
-        if let info = payload["info"] as? [String: Any] {
-            if let model = info["model"] as? String, !model.isEmpty { return model }
-            if let modelName = info["model_name"] as? String, !modelName.isEmpty { return modelName }
+
+        guard contains(Array(#""token_count""#.utf8), in: bytes) else {
+            return nil
+        }
+
+        let timestamp = stringValue(for: "timestamp", in: bytes).flatMap {
+            primaryDateFormatter.date(from: $0) ?? fallbackDateFormatter.date(from: $0)
+        }
+        guard contains(Array(#""total_token_usage""#.utf8), in: bytes)
+                || contains(Array(#""last_token_usage""#.utf8), in: bytes) else {
+            return ParsedLine(model: nil, counters: nil, timestamp: timestamp)
+        }
+
+        let counters = TokenCounters(
+            input: integerValue(for: "input_tokens", in: bytes),
+            cached: integerValue(for: "cached_input_tokens", in: bytes),
+            cacheWrite: integerValue(for: "cache_write_input_tokens", in: bytes),
+            output: integerValue(for: "output_tokens", in: bytes)
+        )
+        return ParsedLine(model: nil, counters: counters, timestamp: timestamp)
+    }
+
+    private static func stringValue(for key: String, in bytes: [UInt8]) -> String? {
+        guard let field = fieldStart(for: key, in: bytes) else { return nil }
+        var index = field
+        skipWhitespace(in: bytes, index: &index)
+        guard index < bytes.count, bytes[index] == 0x3A else { return nil }
+        index += 1
+        skipWhitespace(in: bytes, index: &index)
+        guard index < bytes.count, bytes[index] == 0x22 else { return nil }
+        index += 1
+        var output: [UInt8] = []
+        while index < bytes.count {
+            switch bytes[index] {
+            case 0x22:
+                return String(bytes: output, encoding: .utf8)
+            case 0x5C:
+                guard index + 1 < bytes.count else { return nil }
+                index += 1
+                switch bytes[index] {
+                case 0x22, 0x5C, 0x2F: output.append(bytes[index])
+                case 0x6E: output.append(0x0A)
+                case 0x72: output.append(0x0D)
+                case 0x74: output.append(0x09)
+                default: return nil
+                }
+            default:
+                output.append(bytes[index])
+            }
+            index += 1
         }
         return nil
     }
 
-    private static func parseDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    private static func integerValue(for key: String, in bytes: [UInt8]) -> Int64 {
+        guard let field = fieldStart(for: key, in: bytes) else { return 0 }
+        var index = field
+        skipWhitespace(in: bytes, index: &index)
+        guard index < bytes.count, bytes[index] == 0x3A else { return 0 }
+        index += 1
+        skipWhitespace(in: bytes, index: &index)
+        var sign: Int64 = 1
+        if index < bytes.count, bytes[index] == 0x2D {
+            sign = -1
+            index += 1
+        }
+        var value: Int64 = 0
+        var sawDigit = false
+        while index < bytes.count, bytes[index] >= 0x30, bytes[index] <= 0x39 {
+            sawDigit = true
+            let digit = Int64(bytes[index] - 0x30)
+            let (multiplied, multiplicationOverflow) = value.multipliedReportingOverflow(by: 10)
+            let (added, additionOverflow) = multiplied.addingReportingOverflow(digit)
+            if multiplicationOverflow || additionOverflow { return 0 }
+            value = added
+            index += 1
+        }
+        return sawDigit ? value * sign : 0
+    }
+
+    private static func fieldStart(for key: String, in bytes: [UInt8]) -> Int? {
+        let marker = Array(("\"" + key + "\"").utf8)
+        guard bytes.count >= marker.count else { return nil }
+        for start in 0...(bytes.count - marker.count) {
+            guard bytes[start..<start + marker.count].elementsEqual(marker) else { continue }
+            // A quote escaped inside a prompt string is not a JSON field.
+            if start > 0, bytes[start - 1] == 0x5C { continue }
+            var index = start + marker.count
+            skipWhitespace(in: bytes, index: &index)
+            if index < bytes.count, bytes[index] == 0x3A {
+                return index + 1
+            }
+        }
+        return nil
+    }
+
+    private static func contains(_ needle: [UInt8], in bytes: [UInt8]) -> Bool {
+        guard !needle.isEmpty, bytes.count >= needle.count else { return false }
+        for start in 0...(bytes.count - needle.count) {
+            if bytes[start..<start + needle.count].elementsEqual(needle) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func skipWhitespace(in bytes: [UInt8], index: inout Int) {
+        while index < bytes.count, bytes[index] == 0x20 || bytes[index] == 0x09
+                || bytes[index] == 0x0A || bytes[index] == 0x0D {
+            index += 1
+        }
     }
 
     private static func rates(for rawModel: String) -> Rates? {
