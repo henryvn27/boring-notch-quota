@@ -40,12 +40,15 @@ final class CodexUsageManager: ObservableObject {
     func start() {
         guard periodicTask == nil else { return }
         refreshOfficial(force: true)
+        // Warm the local cost estimate with the other Codex data at app
+        // launch, so opening the tab later only reads the cached result.
+        refreshCost(force: true)
         refreshForecast(force: true)
         periodicTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
                 guard !Task.isCancelled else { return }
-                self?.refreshIfNeeded(includeCost: false)
+                self?.refreshIfNeeded(includeCost: true)
             }
         }
     }

@@ -42,7 +42,6 @@ struct CodexTabView: View {
         }
         .onAppear {
             manager.start()
-            manager.refreshNow()
             updateNotchHeightForCostDetail()
         }
         .onChange(of: showingCostDetail) { _, _ in
