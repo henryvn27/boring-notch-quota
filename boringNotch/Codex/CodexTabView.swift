@@ -295,10 +295,11 @@ private struct CodexCard<Content: View>: View {
 }
 
 enum CodexIdleUsageLayout {
-    // Leave enough text width for the widest valid pace label ("-100%")
-    // without making the closed notch feel materially wider.
-    static let sideWidth: CGFloat = 44
-    static let sidePadding: CGFloat = 2
+    // Reserve a real four-character label lane for "-100%" on either wing.
+    // The zero-padded geometry is still four points narrower overall than the
+    // original 48pt + 3pt-per-side layout.
+    static let sideWidth: CGFloat = 50
+    static let sidePadding: CGFloat = 1
     static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
 
     static func compactCenterWidth(for notchWidth: CGFloat) -> CGFloat {
@@ -344,8 +345,9 @@ struct CodexIdleUsageView: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                    .minimumScaleFactor(0.72)
                     .allowsTightening(true)
+                    .fixedSize(horizontal: true, vertical: false)
                     .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .trailing)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
 
@@ -353,12 +355,13 @@ struct CodexIdleUsageView: View {
                     .frame(width: CodexIdleUsageLayout.compactCenterWidth(for: notchWidth))
 
                 Text(balanceLabel)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(balanceColor)
                     .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                    .minimumScaleFactor(0.72)
                     .allowsTightening(true)
+                    .fixedSize(horizontal: true, vertical: false)
                     .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .leading)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             }
@@ -445,8 +448,9 @@ struct CodexCompactPaceWing: View {
             .foregroundStyle(balanceColor)
             .monospacedDigit()
             .lineLimit(1)
-            .minimumScaleFactor(0.82)
+            .minimumScaleFactor(0.72)
             .allowsTightening(true)
+            .fixedSize(horizontal: true, vertical: false)
             .frame(width: CodexIdleUsageLayout.sideWidth, height: height, alignment: .leading)
             .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             .onAppear {
