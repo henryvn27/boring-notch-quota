@@ -516,7 +516,9 @@ struct ContentView: View {
             }
             .frame(
                 width: (codexClosedContentMode == .music && Defaults[.codexShowPace])
-                    ? CodexIdleUsageLayout.sideWidth + (CodexIdleUsageLayout.sidePadding * 2)
+                    // Let the pace wing report its intrinsic width. Its label
+                    // grows from two to three digits only when that is needed.
+                    ? nil
                     : max(
                         0,
                         vm.effectiveClosedNotchHeight - 12

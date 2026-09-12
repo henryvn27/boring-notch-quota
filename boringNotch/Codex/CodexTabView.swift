@@ -608,12 +608,13 @@ private struct CodexCard<Content: View>: View {
 }
 
 enum CodexIdleUsageLayout {
-    // Reserve a real four-character label lane for "-100%" on either wing.
-    // The zero-padded geometry is still four points narrower overall than the
-    // original 48pt + 3pt-per-side layout.
-    static let sideWidth: CGFloat = 50
+    // Keep the outer chin wide enough for the largest compact value, while
+    // allowing the visible wings to size themselves to the label they contain.
+    // This keeps ordinary two-digit values compact without ever truncating
+    // three-digit values such as "100%" or "-100%".
+    static let maximumSideWidth: CGFloat = 42
     static let sidePadding: CGFloat = 1
-    static let totalWingWidth: CGFloat = (sideWidth + (sidePadding * 2)) * 2
+    static let totalWingWidth: CGFloat = (maximumSideWidth + (sidePadding * 2)) * 2
 
     static func compactCenterWidth(for notchWidth: CGFloat) -> CGFloat {
         notchWidth
@@ -661,7 +662,6 @@ struct CodexIdleUsageView: View {
                     .minimumScaleFactor(0.72)
                     .allowsTightening(true)
                     .fixedSize(horizontal: true, vertical: false)
-                    .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .trailing)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
 
                 Color.black
@@ -675,10 +675,13 @@ struct CodexIdleUsageView: View {
                     .minimumScaleFactor(0.72)
                     .allowsTightening(true)
                     .fixedSize(horizontal: true, vertical: false)
-                    .frame(width: CodexIdleUsageLayout.sideWidth, alignment: .leading)
                     .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             }
-            .frame(width: CodexIdleUsageLayout.totalWidth(for: notchWidth), height: height)
+            // The center remains tied to the real notch width; the two labels
+            // contribute only their intrinsic widths plus a one-point inset.
+            // A three-digit value therefore grows this surface just enough,
+            // instead of making every closed notch pay for that worst case.
+            .frame(height: height)
             .contentShape(Rectangle())
         }
         .buttonStyle(CodexCompactButtonStyle(reduceMotion: reduceMotion))
@@ -764,7 +767,7 @@ struct CodexCompactPaceWing: View {
             .minimumScaleFactor(0.72)
             .allowsTightening(true)
             .fixedSize(horizontal: true, vertical: false)
-            .frame(width: CodexIdleUsageLayout.sideWidth, height: height, alignment: .leading)
+            .frame(height: height, alignment: .leading)
             .padding(.horizontal, CodexIdleUsageLayout.sidePadding)
             .onAppear {
                 manager.start()
