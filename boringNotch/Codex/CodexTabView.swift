@@ -182,14 +182,27 @@ struct CodexTabView: View {
 
     private func compactPaceSummary(_ pace: CodexQuotaPace) -> String {
         let points = Int(abs(pace.balancePercent).rounded())
+        let balance: String
         switch pace.status {
         case .reserve:
-            return "+\(points)%"
+            balance = "+\(points)%"
         case .onPace:
-            return "+0%"
+            balance = "+0%"
         case .deficit:
-            return "-\(points)%"
+            balance = "-\(points)%"
         }
+
+        guard let forecast = pace.exhaustionForecast else { return balance }
+        let forecastSummary: String
+        if forecast.willLastThroughReset {
+            forecastSummary = "Lasts through reset"
+        } else {
+            let timeToEmpty = forecast.estimatedAt.timeIntervalSince(presentationDate)
+            forecastSummary = timeToEmpty < 60
+                ? "Runs out <1m"
+                : "Runs out in \(CodexTimeFormatter.duration(timeToEmpty))"
+        }
+        return "\(forecastSummary) · \(balance)"
     }
 
     private var apiCostCard: some View {
