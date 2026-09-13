@@ -22,7 +22,9 @@ enum CodexLocalCostServiceError: LocalizedError {
 /// A bounded, read-only approximation of the local Codex token-counter scan.
 /// It intentionally reports partial coverage whenever a record or model cannot be priced.
 actor CodexLocalCostService: CodexLocalCostEstimating {
-    private static let pricingAsOf = Date(timeIntervalSince1970: 1_784_505_600)
+    // Rates last reconciled against the OpenAI model cards and CodexBar's live
+    // OpenAI/models.dev pricing path on 2026-09-12.
+    private static let pricingAsOf = Date(timeIntervalSince1970: 1_789_185_600)
     private static let maximumFileBytes = 1_024 * 1_024 * 1_024
     private static let maximumLineBytes = 1 * 1_024 * 1_024
     // The local Codex history is intentionally bounded, but the old 250-file
@@ -574,9 +576,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 cacheWriteAbove: 25, outputAbove: 75)
         case "gpt-5.6-sol":
             return Rates(
-                input: 5, cached: 0.5, cacheWrite: 6.25, output: 30,
-                thresholdTokens: 272_000, inputAbove: 10, cachedAbove: 1,
-                cacheWriteAbove: 12.5, outputAbove: 45)
+                input: 4, cached: 0.4, cacheWrite: 5, output: 20,
+                thresholdTokens: 272_000, inputAbove: 8, cachedAbove: 0.8,
+                cacheWriteAbove: 10, outputAbove: 30)
         case "gpt-5.6-terra":
             return Rates(
                 input: 2, cached: 0.2, cacheWrite: 2.5, output: 12,
