@@ -559,7 +559,7 @@ private struct CodexQuotaMeter: View {
                 Capsule()
                     .fill(.primary.opacity(0.16))
                 Capsule()
-                    .fill(.accentColor)
+                    .fill(Color.effectiveAccent)
                     .frame(width: geometry.size.width * fraction(displayedPercent))
 
                 if let expectedPercent {

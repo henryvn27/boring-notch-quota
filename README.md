@@ -31,12 +31,60 @@ local Codex app-server; local cost data is read-only and bounded.
 
 ## Install
 
-The first public build is source/CI based. Once a signed release is available,
-the release page will contain the installable DMG:
+### Source install (works today)
+
+The fork includes a non-interactive installer. It builds the current checkout
+and installs `Notch.app` to `~/Applications` without `sudo` or system-wide
+changes:
+
+```bash
+git clone https://github.com/henryvn27/notch.git
+cd notch
+./scripts/install.sh --yes
+```
+
+Use `--no-launch` when an agent should install without opening the app:
+
+```bash
+./scripts/install.sh --yes --no-launch
+```
+
+Requirements: macOS 14 or later, Xcode 16.4 or newer, and an Apple Silicon or
+Intel Mac.
+
+### Agent-friendly install
+
+Agents should use an explicit checkout, a fast-forward-only update, and the
+non-interactive installer. The final `test` makes the install target easy to
+verify:
+
+```bash
+set -euo pipefail
+test "$(uname -s)" = "Darwin"
+command -v xcodebuild >/dev/null
+mkdir -p "$HOME/Developer"
+if [ ! -d "$HOME/Developer/notch/.git" ]; then
+  git clone https://github.com/henryvn27/notch.git "$HOME/Developer/notch"
+fi
+cd "$HOME/Developer/notch"
+git pull --ff-only
+./scripts/install.sh --yes --no-launch
+test -d "$HOME/Applications/Notch.app"
+open "$HOME/Applications/Notch.app"
+```
+
+The installer only replaces the exact target app at `~/Applications/Notch.app`.
+It does not change volume, media playback, Accessibility permissions, or other
+system settings.
+
+### DMG releases
+
+Once a signed release is available, the release page will contain the
+installable DMG:
 
 <https://github.com/henryvn27/notch/releases>
 
-To build locally:
+To build and run manually instead:
 
 1. Use macOS 14 or later with a current Xcode release.
 2. Clone this fork and open `boringNotch.xcodeproj`.
