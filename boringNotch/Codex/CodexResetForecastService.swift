@@ -38,16 +38,15 @@ struct CodexResetForecastService: CodexResetForecastFetching, @unchecked Sendabl
         if let radar = try? decoder.decode(RadarEnvelope.self, from: data),
            radar.code == 0,
            let data = radar.data,
-           let score = data.probability48h ?? data.probability24h
+           data.probability48h != nil || data.probability24h != nil
         {
-            let horizonHours = data.probability48h == nil ? 24 : 48
             let verdictCode = data.verdict?.lowercased()
             return CodexResetForecast(
-                score: min(max(score, 0), 100),
+                probability24h: data.probability24h.map { min(max($0, 0), 100) },
+                probability48h: data.probability48h.map { min(max($0, 0), 100) },
                 resetAnnounced: verdictCode == "confirmed",
                 verdictCode: verdictCode,
                 verdictLabel: displayLabel(for: verdictCode),
-                horizonHours: horizonHours,
                 sourceStale: false,
                 fetchedAt: parseDate(data.updatedAt),
                 nextRefreshAt: nil
@@ -57,17 +56,16 @@ struct CodexResetForecastService: CodexResetForecastFetching, @unchecked Sendabl
         if let live = try? decoder.decode(LiveVerdictEnvelope.self, from: data),
            let verdict = live.verdict,
            let probabilities = live.probabilities,
-           let score = probabilities.h48 ?? probabilities.h24
+           probabilities.h48 != nil || probabilities.h24 != nil
         {
-            let horizonHours = probabilities.h48 == nil ? 24 : 48
             let fetchedAt = parseDate(live.checkedAt)
                 ?? parseDate(live.freshness?.upstreamUpdatedAt)
             return CodexResetForecast(
-                score: min(max(score, 0), 100),
+                probability24h: probabilities.h24.map { min(max($0, 0), 100) },
+                probability48h: probabilities.h48.map { min(max($0, 0), 100) },
                 resetAnnounced: verdict.code == "confirmed",
                 verdictCode: verdict.code,
                 verdictLabel: verdict.label,
-                horizonHours: horizonHours,
                 sourceStale: live.freshness?.statusStale ?? false,
                 fetchedAt: fetchedAt,
                 nextRefreshAt: nil
@@ -78,12 +76,14 @@ struct CodexResetForecastService: CodexResetForecastFetching, @unchecked Sendabl
         // or mirrored responses age out. The live source above remains the
         // only default endpoint used by the app.
         let legacy = try decoder.decode(LegacyForecastEnvelope.self, from: data)
+        let score = min(max(legacy.forecast.score, 0), 100)
+        let horizonHours = legacy.forecast.horizonHours ?? 48
         return CodexResetForecast(
-            score: min(max(legacy.forecast.score, 0), 100),
+            probability24h: horizonHours == 24 ? score : nil,
+            probability48h: horizonHours == 48 ? score : nil,
             resetAnnounced: legacy.forecast.resetAnnounced,
             verdictCode: legacy.forecast.resetAnnounced ? "confirmed" : nil,
             verdictLabel: legacy.forecast.resetAnnounced ? "RESET CONFIRMED" : nil,
-            horizonHours: legacy.forecast.horizonHours ?? 48,
             sourceStale: false,
             fetchedAt: parseDate(legacy.fetchedAt),
             nextRefreshAt: parseDate(legacy.nextRefreshAt)

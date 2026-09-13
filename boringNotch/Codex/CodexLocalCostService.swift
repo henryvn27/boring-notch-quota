@@ -29,7 +29,16 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
     // ceiling silently dropped a large part of an active user's month. Keep a
     // generous ceiling and let the deadline be the final safety valve.
     private static let maximumFiles = 5_000
-    private static let maximumScanDuration: TimeInterval = 45
+    // Cost history is read on a background actor, not while the notch is being
+    // laid out. A short cutoff made a 30-day history with a few large rollout
+    // files look like it only contained the newest couple of days. Give the
+    // bounded scanner enough time to finish the local history before declaring
+    // the estimate partial; the UI remains responsive while this runs.
+    private static let maximumScanDuration: TimeInterval = 300
+    // A rollout is independent from every other rollout. Reading a small
+    // number in parallel keeps a month of local history from being truncated
+    // by the deadline while avoiding an unbounded file-descriptor burst.
+    private static let maximumScanConcurrency = 6
     // Narrow byte markers keep large prompt/tool records out of
     // JSONSerialization while still accepting compact JSON and pretty output.
     private static let relevantMarkers: [Data] = [
@@ -69,13 +78,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var modelTotals: [String: CostAggregate] = [:]
         var detectedPlanType: String?
 
-        for url in files {
+        let results = await Self.scanFiles(files, interval: interval, deadline: deadline)
+        for result in results {
             try Task.checkCancellation()
-            if Date() >= deadline {
-                partial = true
-                break
-            }
-            let result = scan(url: url, interval: interval, deadline: deadline)
             total += result.amount
             pricedTokens += result.pricedTokens
             unpricedTokens += result.unpricedTokens
@@ -129,6 +134,41 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         )
     }
 
+    private static func scanFiles(
+        _ files: [URL],
+        interval: DateInterval,
+        deadline: Date
+    ) async -> [ScanResult] {
+        guard !files.isEmpty else { return [] }
+
+        return await withTaskGroup(of: ScanResult.self, returning: [ScanResult].self) { group in
+            var nextIndex = 0
+            var results: [ScanResult] = []
+            let workerCount = min(Self.maximumScanConcurrency, files.count)
+
+            func addNextScan() {
+                guard nextIndex < files.count else { return }
+                let url = files[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    guard !Task.isCancelled, Date() < deadline else {
+                        return ScanResult(partial: true)
+                    }
+                    return Self.scan(url: url, interval: interval, deadline: deadline)
+                }
+            }
+
+            for _ in 0..<workerCount {
+                addNextScan()
+            }
+            while let result = await group.next() {
+                results.append(result)
+                addNextScan()
+            }
+            return results
+        }
+    }
+
     private func discoverFiles(for interval: DateInterval, deadline: Date) -> [URL] {
         let candidates = roots.flatMap { (root: URL) -> [URL] in
             guard let enumerator = FileManager.default.enumerator(
@@ -153,7 +193,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         return Array(candidates.prefix(Self.maximumFiles))
     }
 
-    private func scan(url: URL, interval: DateInterval, deadline: Date) -> ScanResult {
+    private nonisolated static func scan(url: URL, interval: DateInterval, deadline: Date) -> ScanResult {
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             return ScanResult(partial: true)
         }
@@ -611,7 +651,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         }
     }
 
-    private struct ScanResult {
+    private struct ScanResult: @unchecked Sendable {
         var amount: Decimal = .zero
         var pricedTokens: Int64 = 0
         var unpricedTokens: Int64 = 0

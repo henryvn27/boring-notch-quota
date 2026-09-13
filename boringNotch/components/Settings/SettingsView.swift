@@ -140,6 +140,7 @@ struct CodexSettings: View {
     @Default(.codexCostHistoryRange) private var costHistoryRange
     @Default(.codexPlanPricing) private var codexPlanPricing
     @Default(.codexClosedContentMode) private var closedContentMode
+    @Default(.codexResetForecastDisplayMode) private var resetForecastDisplayMode
 
     private var availableWindowPreferences: [CodexQuotaWindowPreference] {
         manager.snapshot?.availableWindowPreferences ?? CodexQuotaWindowPreference.allCases
@@ -301,8 +302,19 @@ struct CodexSettings: View {
                     Text("Show unofficial reset forecast")
                 }
 
+                Picker("Reset forecast horizons", selection: $resetForecastDisplayMode) {
+                    ForEach(CodexResetForecastDisplayMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(resetForecastDisplayMode.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text(
-                    "These sections use the same local usage and forecast data as the Codex tab. Turning a section off only changes its presentation."
+                    "These sections use the same local usage and forecast data as the Codex tab. Turning a section off or choosing a horizon only changes its presentation."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

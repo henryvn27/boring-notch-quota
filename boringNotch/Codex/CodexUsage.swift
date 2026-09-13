@@ -154,6 +154,33 @@ enum CodexQuotaWindowDisplayMode: String, CaseIterable, Codable, Defaults.Serial
     }
 }
 
+enum CodexResetForecastDisplayMode: String, CaseIterable, Codable, Defaults.Serializable, Identifiable, Sendable {
+    case both
+    case twentyFourHours
+    case fortyEightHours
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .both: "24h + 48h"
+        case .twentyFourHours: "24-hour"
+        case .fortyEightHours: "48-hour"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .both:
+            "Show both reset probabilities when the source provides them."
+        case .twentyFourHours:
+            "Show only the chance of a reset in the next 24 hours."
+        case .fortyEightHours:
+            "Show only the chance of a reset in the next 48 hours."
+        }
+    }
+}
+
 struct CodexUsageLimit: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
@@ -565,14 +592,22 @@ struct CodexResetForecast: Equatable, Sendable {
     static let sourceURL = URL(string: "https://willcodexreset.com/")!
     static let endpointURL = URL(string: "https://willcodexreset.com/api/reset-radar")!
 
-    let score: Double
+    let probability24h: Double?
+    let probability48h: Double?
     let resetAnnounced: Bool
     let verdictCode: String?
     let verdictLabel: String?
-    let horizonHours: Int
     let sourceStale: Bool
     let fetchedAt: Date?
     let nextRefreshAt: Date?
+
+    var score: Double {
+        probability48h ?? probability24h ?? 0
+    }
+
+    var horizonHours: Int {
+        probability48h == nil ? 24 : 48
+    }
 }
 
 enum CodexTimeFormatter {

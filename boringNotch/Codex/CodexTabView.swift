@@ -13,6 +13,7 @@ struct CodexTabView: View {
     @Default(.codexShowPace) private var showPace
     @Default(.codexShowCostEstimate) private var showCostEstimate
     @Default(.codexShowResetForecast) private var showResetForecast
+    @Default(.codexResetForecastDisplayMode) private var resetForecastDisplayMode
     @Default(.codexPlanPricing) private var codexPlanPricing
     @State private var showingCostDetail = false
 
@@ -649,14 +650,7 @@ struct CodexTabView: View {
             subtitle: "Third-party signal"
         ) {
             if let forecast = manager.forecast {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text("\(Int(forecast.score.rounded()))%")
-                        .font(.title2.weight(.semibold).monospacedDigit())
-                    Text("next \(forecast.horizonHours)h")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                forecastValues(for: forecast)
 
                 if forecast.resetAnnounced {
                     Text("Reset announced")
@@ -676,6 +670,44 @@ struct CodexTabView: View {
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chance of reset")
+    }
+
+    @ViewBuilder
+    private func forecastValues(for forecast: CodexResetForecast) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            switch resetForecastDisplayMode {
+            case .both:
+                if let probability = forecast.probability24h {
+                    forecastValue(probability: probability, horizon: 24)
+                }
+                if let probability = forecast.probability48h {
+                    forecastValue(probability: probability, horizon: 48)
+                }
+            case .twentyFourHours:
+                if let probability = forecast.probability24h {
+                    forecastValue(probability: probability, horizon: 24)
+                } else if let probability = forecast.probability48h {
+                    forecastValue(probability: probability, horizon: 48)
+                }
+            case .fortyEightHours:
+                if let probability = forecast.probability48h {
+                    forecastValue(probability: probability, horizon: 48)
+                } else if let probability = forecast.probability24h {
+                    forecastValue(probability: probability, horizon: 24)
+                }
+            }
+        }
+    }
+
+    private func forecastValue(probability: Double, horizon: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("\(Int(probability.rounded()))%")
+                .font(.title2.weight(.semibold).monospacedDigit())
+            Text("next \(horizon)h")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
     }
 
     private func updateNotchHeightForCostDetail() {
