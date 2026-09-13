@@ -15,6 +15,10 @@ enum NotchMotion {
     static let open = Animation.spring(response: 0.36, dampingFraction: 0.92, blendDuration: 0)
     static let close = Animation.easeOut(duration: 0.18)
     static let gesture = Animation.interactiveSpring(response: 0.34, dampingFraction: 0.88, blendDuration: 0)
+    // Tab changes are frequent, so they should feel immediate and settled.
+    // The small amount of damping gives the selection capsule and content
+    // transition one shared landing without adding a visible bounce.
+    static let tabSwitch = Animation.spring(response: 0.24, dampingFraction: 0.96, blendDuration: 0)
 }
 
 class BoringViewModel: NSObject, ObservableObject {
@@ -151,8 +155,7 @@ class BoringViewModel: NSObject, ObservableObject {
                 webcamManager.stopSession()
                 isCameraExpanded = false
             } else if webcamManager.cameraAvailable {
-                webcamManager.startSession()
-                isCameraExpanded = true
+                startCameraPreviewAndShowHome()
             }
 
         case .denied, .restricted:
@@ -178,14 +181,27 @@ class BoringViewModel: NSObject, ObservableObject {
 
         case .notDetermined:
             isRequestingAuthorization = true
-            webcamManager.checkAndRequestVideoAuthorization()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            webcamManager.checkAndRequestVideoAuthorization { [weak self] cameraAvailable in
+                guard let self else { return }
                 self.isRequestingAuthorization = false
+                guard cameraAvailable else { return }
+                self.startCameraPreviewAndShowHome()
             }
 
         default:
             break
         }
+    }
+
+    /// Activating the header camera control should land on the tab that owns
+    /// the preview. Selecting Home before starting capture lets the preview
+    /// view appear while the session finishes configuring asynchronously.
+    private func startCameraPreviewAndShowHome() {
+        withAnimation(NotchMotion.tabSwitch) {
+            coordinator.selectTab(.home)
+        }
+        isCameraExpanded = true
+        webcamManager.startSession()
     }
     
     func isMouseHovering(position: NSPoint = NSEvent.mouseLocation) -> Bool {

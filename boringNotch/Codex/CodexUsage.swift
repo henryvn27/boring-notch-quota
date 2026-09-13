@@ -54,6 +54,106 @@ enum CodexQuotaWindowPreference: String, CaseIterable, Codable, Defaults.Seriali
     }
 }
 
+enum CodexCostBucketGranularity: Sendable {
+    case day
+    case week
+    case month
+
+    var label: String {
+        switch self {
+        case .day: "day"
+        case .week: "week"
+        case .month: "month"
+        }
+    }
+}
+
+enum CodexCostHistoryRange: String, CaseIterable, Codable, Defaults.Serializable, Hashable, Identifiable, Sendable {
+    case last7Days
+    case last30Days
+    case last90Days
+    case lastYear
+    case allAvailable
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .last7Days: "Last 7 days"
+        case .last30Days: "Last 30 days"
+        case .last90Days: "Last 3 months"
+        case .lastYear: "Last year"
+        case .allAvailable: "All available"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .last7Days: "7 days"
+        case .last30Days: "30 days"
+        case .last90Days: "3 months"
+        case .lastYear: "1 year"
+        case .allAvailable: "All available"
+        }
+    }
+
+    var durationDays: Int {
+        switch self {
+        case .last7Days: 7
+        case .last30Days: 30
+        case .last90Days: 90
+        case .lastYear: 365
+        // A century is effectively unbounded for local Codex history while
+        // keeping the request representable as a bounded scan.
+        case .allAvailable: 36_500
+        }
+    }
+
+    /// Keep the chart legible as the selected history grows: short ranges
+    /// retain one bar per day, while longer ranges roll up to weeks or months.
+    var bucketGranularity: CodexCostBucketGranularity {
+        switch self {
+        case .last7Days, .last30Days: .day
+        case .last90Days: .week
+        case .lastYear, .allAvailable: .month
+        }
+    }
+
+    func interval(endingAt now: Date, calendar: Calendar = .current) -> DateInterval {
+        let end = now
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -(durationDays - 1), to: today) ?? today
+        return DateInterval(start: start, end: max(end, start.addingTimeInterval(0.001)))
+    }
+}
+
+enum CodexQuotaWindowDisplayMode: String, CaseIterable, Codable, Defaults.Serializable, Identifiable, Sendable {
+    case automatic
+    case weeklyOnly
+    case allAvailable
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .weeklyOnly: "Weekly only"
+        case .allAvailable: "All available"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .automatic:
+            "Use the reset windows attached to your Codex plan. Model-specific limits are kept out of the main quota view."
+        case .weeklyOnly:
+            "Show only the weekly reset window, even when your account also exposes a 5-hour window."
+        case .allAvailable:
+            "Show every standard reset window returned for the account."
+        }
+    }
+}
+
 struct CodexUsageLimit: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
@@ -121,6 +221,165 @@ struct CodexUsageSnapshot: Equatable, Sendable {
         case (true, false): .fiveHourOnly
         case (false, false): .custom
         }
+    }
+}
+
+/// The usage RPC identifies the broad plan family, but it does not reliably
+/// distinguish the two Pro tiers. Keep that ambiguity visible instead of
+/// silently comparing a Pro account against the wrong monthly price.
+enum CodexPlanPricing: String, CaseIterable, Codable, Defaults.Serializable, Identifiable, Sendable {
+    case automatic
+    case plus
+    case pro100
+    case pro200
+    case noFixedPrice
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .plus: "Plus · $20/month"
+        case .pro100: "Pro 5x · $100/month"
+        case .pro200: "Pro 20x · $200/month"
+        case .noFixedPrice: "No fixed monthly price"
+        }
+    }
+
+    var planLabel: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .plus: "Plus"
+        case .pro100: "Pro 5x"
+        case .pro200: "Pro 20x"
+        case .noFixedPrice: "Custom"
+        }
+    }
+
+    var monthlyPrice: Decimal? {
+        switch self {
+        case .automatic, .noFixedPrice:
+            nil
+        case .plus:
+            20
+        case .pro100:
+            100
+        case .pro200:
+            200
+        }
+    }
+}
+
+struct CodexPlanInfo: Equatable, Sendable {
+    let planLabel: String
+    let monthlyPrice: Decimal?
+    let isDetected: Bool
+    let isPriceAmbiguous: Bool
+
+    var monthlyPriceLabel: String? {
+        guard let monthlyPrice else { return nil }
+        return NSDecimalNumber(decimal: monthlyPrice).doubleValue
+            .formatted(.currency(code: "USD")) + "/month"
+    }
+
+    /// Resolve the server-provided family and an optional user-selected tier
+    /// into the pricing context used by the API-equivalent display.
+    static func resolve(planType: String?, pricing: CodexPlanPricing) -> Self {
+        if pricing != .automatic {
+            return Self(
+                planLabel: pricing.planLabel,
+                monthlyPrice: pricing.monthlyPrice,
+                isDetected: !pricingEqualsNoFixedPrice(pricing),
+                isPriceAmbiguous: false
+            )
+        }
+
+        guard let rawPlanType = planType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawPlanType.isEmpty
+        else {
+            return Self(
+                planLabel: "Plan unavailable",
+                monthlyPrice: nil,
+                isDetected: false,
+                isPriceAmbiguous: false
+            )
+        }
+
+        let normalized = rawPlanType
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+
+        if normalized.contains("pro100") || normalized.contains("pro5x") || normalized == "prolite" {
+            return Self(planLabel: "Pro 5x", monthlyPrice: 100, isDetected: true, isPriceAmbiguous: false)
+        }
+        if normalized.contains("pro200") || normalized.contains("pro20x") {
+            return Self(planLabel: "Pro 20x", monthlyPrice: 200, isDetected: true, isPriceAmbiguous: false)
+        }
+
+        switch normalized {
+        case "plus", "chatgptplus":
+            return Self(planLabel: "Plus", monthlyPrice: 20, isDetected: true, isPriceAmbiguous: false)
+        case "pro", "chatgptpro", "codexpro":
+            // Codex's current plan identifiers use `pro` for the 20x tier and
+            // `prolite` for the 5x tier. Keep the broad legacy response
+            // conservative when no tier identifier is available.
+            return Self(planLabel: "Pro", monthlyPrice: nil, isDetected: true, isPriceAmbiguous: true)
+        case "free", "freeplan":
+            return Self(planLabel: "Free", monthlyPrice: nil, isDetected: true, isPriceAmbiguous: false)
+        case "go", "chatgptgo":
+            return Self(planLabel: "Go", monthlyPrice: nil, isDetected: true, isPriceAmbiguous: false)
+        case "team", "business", "chatgptteam", "chatgptbusiness":
+            return Self(planLabel: "Business", monthlyPrice: nil, isDetected: true, isPriceAmbiguous: false)
+        case "enterprise", "chatgptenterprise":
+            return Self(planLabel: "Enterprise", monthlyPrice: nil, isDetected: true, isPriceAmbiguous: false)
+        default:
+            return Self(
+                planLabel: rawPlanType.capitalized,
+                monthlyPrice: nil,
+                isDetected: true,
+                isPriceAmbiguous: false
+            )
+        }
+    }
+
+    /// Compare the selected local API-equivalent history with the monthly
+    /// subscription cost prorated over that same period. A 30-day window
+    /// therefore gives the expected example: $3,000 / $100 = 30×.
+    func multiplier(
+        for estimate: CodexCostEstimate,
+        historyRange: CodexCostHistoryRange
+    ) -> Double? {
+        guard let monthlyPrice,
+              monthlyPrice > 0,
+              estimate.pricedTokenCount > 0,
+              estimate.measurement.amount > 0
+        else { return nil }
+
+        let comparisonDuration: TimeInterval
+        if historyRange == .allAvailable,
+           let first = estimate.dailyBreakdown.map(\.date).min(),
+           let last = estimate.dailyBreakdown.map(\.date).max() {
+            let calendar = Calendar.current
+            let start = calendar.startOfDay(for: first)
+            let end = calendar.startOfDay(for: last).addingTimeInterval(86_400)
+            comparisonDuration = max(86_400, end.timeIntervalSince(start))
+        } else {
+            comparisonDuration = max(86_400, estimate.measurement.interval.duration)
+        }
+
+        let monthlyCost = NSDecimalNumber(decimal: monthlyPrice).doubleValue
+        let baseline = monthlyCost * comparisonDuration / (30 * 86_400)
+        guard baseline.isFinite, baseline > 0 else { return nil }
+
+        let amount = NSDecimalNumber(decimal: estimate.measurement.amount).doubleValue
+        let multiplier = amount / baseline
+        return multiplier.isFinite && multiplier > 0 ? multiplier : nil
+    }
+
+    private static func pricingEqualsNoFixedPrice(_ pricing: CodexPlanPricing) -> Bool {
+        pricing == .noFixedPrice
     }
 }
 
@@ -296,6 +555,9 @@ struct CodexCostEstimate: Equatable, Sendable {
     let dailyBreakdown: [CodexCostDay]
     let modelBreakdown: [CodexCostModel]
     let refreshedAt: Date
+    /// A plan identifier found in local Codex rollout metadata. This can be
+    /// more specific than the app-server's broad family (`pro`/`plus`).
+    let planType: String?
 }
 
 struct CodexResetForecast: Equatable, Sendable {

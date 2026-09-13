@@ -152,11 +152,17 @@ extension Defaults.Keys {
     // MARK: Codex quota
     static let codexUsageMetric = Key<CodexUsageMetric>("codexUsageMetric", default: .remaining)
     static let codexPreferredWindow = Key<CodexQuotaWindowPreference>("codexPreferredWindow", default: .fiveHour)
+    static let codexQuotaWindowDisplayMode = Key<CodexQuotaWindowDisplayMode>(
+        "codexQuotaWindowDisplayMode",
+        default: .automatic
+    )
     static let codexShowIdleUsage = Key<Bool>("codexShowIdleUsage", default: true)
     static let codexShowPace = Key<Bool>("codexShowPace", default: true)
     static let codexShowCostEstimate = Key<Bool>("codexShowCostEstimate", default: true)
     static let codexShowResetForecast = Key<Bool>("codexShowResetForecast", default: true)
     static let codexClosedContentMode = Key<CodexClosedContentMode>("codexClosedContentMode", default: .music)
+    static let codexCostHistoryRange = Key<CodexCostHistoryRange>("codexCostHistoryRange", default: .last30Days)
+    static let codexPlanPricing = Key<CodexPlanPricing>("codexPlanPricing", default: .automatic)
     
     // MARK: Media playback
     static let coloredSpectrogram = Key<Bool>("coloredSpectrogram", default: true)

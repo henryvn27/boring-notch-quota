@@ -29,8 +29,11 @@ struct ContentView: View {
     @State private var anyDropDebounceTask: Task<Void, Never>?
 
     @State private var gestureProgress: CGFloat = .zero
+    @State private var tabTransitionDirection: TabTransitionDirection = .forward
 
     @State private var haptics: Bool = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Namespace var albumArtNamespace
 
@@ -50,6 +53,34 @@ struct ContentView: View {
     private enum CompactEntrySide {
         case left
         case right
+    }
+
+    private enum TabTransitionDirection {
+        case forward
+        case backward
+
+        var insertionOffset: CGFloat {
+            switch self {
+            case .forward: return 14
+            case .backward: return -14
+            }
+        }
+
+        var removalOffset: CGFloat { -insertionOffset }
+    }
+
+    private var tabTransition: AnyTransition {
+        let insertionOffset = reduceMotion ? 0 : tabTransitionDirection.insertionOffset
+        let removalOffset = reduceMotion ? 0 : tabTransitionDirection.removalOffset
+
+        return .asymmetric(
+            insertion: .offset(x: insertionOffset, y: 0).combined(with: .opacity),
+            removal: .offset(x: removalOffset, y: 0).combined(with: .opacity)
+        )
+    }
+
+    private var tabAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : NotchMotion.tabSwitch
     }
 
     private var contentWindowHeight: CGFloat {
@@ -212,6 +243,10 @@ struct ContentView: View {
                                 }
                             }
                         }
+                    }
+                    .onChange(of: coordinator.currentView) { oldView, newView in
+                        guard oldView != newView else { return }
+                        tabTransitionDirection = newView.tabOrder >= oldView.tabOrder ? .forward : .backward
                     }
                     .sensoryFeedback(.alignment, trigger: haptics)
                     .contextMenu {
@@ -394,15 +429,20 @@ struct ContentView: View {
               }
               .zIndex(2)
             if vm.notchState == .open {
-                VStack {
-                    switch coordinator.currentView {
-                    case .home:
-                        NotchHomeView(albumArtNamespace: albumArtNamespace)
-                    case .shelf:
-                        ShelfView()
-                    case .codex:
-                        CodexTabView()
+                ZStack(alignment: .top) {
+                    ZStack(alignment: .top) {
+                        switch coordinator.currentView {
+                        case .home:
+                            NotchHomeView(albumArtNamespace: albumArtNamespace)
+                        case .shelf:
+                            ShelfView()
+                        case .codex:
+                            CodexTabView()
+                        }
                     }
+                    .id(coordinator.currentView)
+                    .transition(tabTransition)
+                    .animation(tabAnimation, value: coordinator.currentView)
                 }
                 .transition(
                     .asymmetric(
@@ -771,6 +811,16 @@ struct GeneralDropTargetDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         return false
+    }
+}
+
+private extension NotchViews {
+    var tabOrder: Int {
+        switch self {
+        case .home: return 0
+        case .shelf: return 1
+        case .codex: return 2
+        }
     }
 }
 

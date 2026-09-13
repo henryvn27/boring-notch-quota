@@ -67,16 +67,9 @@ struct CodexUsageService: CodexUsageFetching, Sendable {
     guard let result = response.result else { throw CodexUsageServiceError.malformedResponse }
 
     let keyedBuckets = result.rateLimitsByLimitId ?? [:]
-    let buckets: [(key: String, value: RawRateLimitBucket)]
-    if keyedBuckets.isEmpty {
-      guard let bucket = result.rateLimits else {
-        throw CodexUsageServiceError.unavailable(nil)
-      }
-      buckets = [(bucket.limitId ?? "codex", bucket)]
-    } else {
-      buckets = keyedBuckets.keys.sorted().compactMap { key in
-        keyedBuckets[key].map { (key, $0) }
-      }
+    let buckets = canonicalBuckets(from: result, keyedBuckets: keyedBuckets)
+    guard !buckets.isEmpty else {
+      throw CodexUsageServiceError.unavailable(nil)
     }
 
     let showBucketName = buckets.count > 1
@@ -103,6 +96,34 @@ struct CodexUsageService: CodexUsageFetching, Sendable {
       planType: buckets.compactMap(\.value.planType).first,
       fetchedAt: fetchedAt
     )
+  }
+
+  private static func canonicalBuckets(
+    from result: RawRateLimitsResult,
+    keyedBuckets: [String: RawRateLimitBucket]
+  ) -> [(key: String, value: RawRateLimitBucket)] {
+    // `rateLimits` is the account-level Codex quota. The keyed map can also
+    // contain model-specific buckets (for example GPT-5.3-Codex-Spark) with
+    // their own short window. Those are useful for model detail surfaces, but
+    // they are not an additional plan window and must not create a 5-hour lane
+    // in the main quota UI. This keeps the primary/secondary account windows
+    // separate from model-specific limits.
+    if let bucket = result.rateLimits,
+       bucket.primary != nil || bucket.secondary != nil {
+      return [(bucket.limitId ?? "codex", bucket)]
+    }
+
+    if let bucket = keyedBuckets["codex"], bucket.primary != nil || bucket.secondary != nil {
+      return [(bucket.limitId ?? "codex", bucket)]
+    }
+
+    // Keep legacy/single-bucket responses usable without guessing among
+    // multiple model-specific buckets.
+    guard keyedBuckets.count == 1,
+          let entry = keyedBuckets.first,
+          entry.value.primary != nil || entry.value.secondary != nil
+    else { return [] }
+    return [(entry.value.limitId ?? entry.key, entry.value)]
   }
 
   private static func runProbe(executable: URL, timeout: TimeInterval) throws

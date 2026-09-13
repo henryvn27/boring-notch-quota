@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import AppKit
 import Combine
 import Defaults
 import KeyboardShortcuts
@@ -70,6 +71,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenUnlockedObserver: Any?
     private var isScreenLocked: Bool = false
     private var windowScreenDidChangeObserver: Any?
+    private var activeSpaceDidChangeObserver: Any?
+    private var spaceReanchorTask: Task<Void, Never>?
     private var dragDetectors: [String: DragDetector] = [:] // UUID -> DragDetector
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -86,6 +89,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DistributedNotificationCenter.default().removeObserver(observer)
             screenUnlockedObserver = nil
         }
+        if let observer = activeSpaceDidChangeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            activeSpaceDidChangeObserver = nil
+        }
+        spaceReanchorTask?.cancel()
+        spaceReanchorTask = nil
         MusicManager.shared.destroy()
         CodexUsageManager.shared.stop()
         cleanupDragDetectors()
@@ -302,12 +311,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let screenFrame = screen.frame
-        window.setFrameOrigin(
-            NSPoint(
-                x: screenFrame.origin.x + (screenFrame.width / 2) - window.frame.width / 2,
-                y: screenFrame.origin.y + screenFrame.height - window.frame.height
-            ))
+        let targetOrigin = NSPoint(
+            x: screenFrame.origin.x + (screenFrame.width / 2) - window.frame.width / 2,
+            y: screenFrame.origin.y + screenFrame.height - window.frame.height
+        )
+
+        // Spaces can temporarily present a joined window at a slightly
+        // different origin during the swipe animation. Avoid writing the
+        // frame when it is already anchored so the correction stays quiet.
+        let originDidMove = abs(window.frame.origin.x - targetOrigin.x) > 0.5
+            || abs(window.frame.origin.y - targetOrigin.y) > 0.5
+        if originDidMove {
+            window.setFrameOrigin(targetOrigin)
+        }
         window.alphaValue = 1
+    }
+
+    @MainActor
+    private func scheduleSpaceReanchor() {
+        spaceReanchorTask?.cancel()
+        spaceReanchorTask = Task { @MainActor [weak self] in
+            // Let the Space transition settle before correcting the origin.
+            // This keeps the window from visibly fighting the system animation.
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            self?.adjustWindowPosition()
+        }
     }
 
     @MainActor
@@ -344,6 +373,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+
+        // `stationary` keeps the notch visible while Spaces move. Re-anchor
+        // once after a Space change as a fallback for macOS versions that
+        // briefly offset joined windows during the swipe transition.
+        activeSpaceDidChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: NSWorkspace.shared,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.scheduleSpaceReanchor()
+            }
+        }
 
         NotificationCenter.default.addObserver(
             forName: Notification.Name.selectedScreenChanged, object: nil, queue: nil

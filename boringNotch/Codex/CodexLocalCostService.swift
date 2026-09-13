@@ -28,11 +28,12 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
     // The local Codex history is intentionally bounded, but the old 250-file
     // ceiling silently dropped a large part of an active user's month. Keep a
     // generous ceiling and let the deadline be the final safety valve.
-    private static let maximumFiles = 1_000
+    private static let maximumFiles = 5_000
     private static let maximumScanDuration: TimeInterval = 45
     // Narrow byte markers keep large prompt/tool records out of
     // JSONSerialization while still accepting compact JSON and pretty output.
     private static let relevantMarkers: [Data] = [
+        Data(#""token_usage_record""#.utf8),
         Data(#""token_count""#.utf8),
         Data(#""turn_context""#.utf8),
         Data(#""thread_settings_applied""#.utf8),
@@ -58,16 +59,6 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             throw CodexLocalCostServiceError.invalidInterval
         }
 
-        // CodexBar is the reference implementation for local Codex history. Its scanner handles
-        // forked/subagent rollouts, model changes, and progressive catch-up; use it when present so
-        // the API-equivalent card agrees with the user's installed CodexBar. The self-contained
-        // scanner below remains the fallback for machines without CodexBar.
-        do {
-            return try await Self.estimateWithCodexBar(interval: interval)
-        } catch {
-            NSLog("CodexBar local cost unavailable; using Notch fallback: %@", error.localizedDescription)
-        }
-
         let deadline = Date().addingTimeInterval(Self.maximumScanDuration)
         let files = discoverFiles(for: interval, deadline: deadline)
         var total = Decimal.zero
@@ -76,6 +67,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var partial = false
         var dailyTotals: [Date: CostAggregate] = [:]
         var modelTotals: [String: CostAggregate] = [:]
+        var detectedPlanType: String?
 
         for url in files {
             try Task.checkCancellation()
@@ -88,6 +80,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             pricedTokens += result.pricedTokens
             unpricedTokens += result.unpricedTokens
             partial = partial || result.partial
+            if let planType = result.planType, !planType.isEmpty {
+                detectedPlanType = planType
+            }
             for contribution in result.contributions {
                 let day = Calendar.current.startOfDay(for: contribution.date)
                 dailyTotals[day, default: CostAggregate()].add(contribution)
@@ -129,181 +124,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             unpricedTokenCount: unpricedTokens,
             dailyBreakdown: dailyBreakdown,
             modelBreakdown: modelBreakdown,
-            refreshedAt: Date()
+            refreshedAt: Date(),
+            planType: detectedPlanType
         )
-    }
-
-    private static func estimateWithCodexBar(interval: DateInterval) async throws -> CodexCostEstimate {
-        guard let executable = codexBarExecutableURL() else {
-            throw CodexLocalCostServiceError.unavailable
-        }
-
-        let dayCount = max(1, Int(ceil(interval.duration / 86_400)))
-        let output = try await runBoundedProcessOperation {
-            let runner = try BoundedProcessRunner(
-                executableURL: executable,
-                arguments: [
-                    "cost",
-                    "--provider", "codex",
-                    "--format", "json",
-                    "--pretty",
-                    "--days", String(dayCount),
-                    "--refresh",
-                ],
-                timeout: 60,
-                maximumOutputSize: 16 * 1_024 * 1_024
-            )
-            defer { runner.stop() }
-            try runner.readToExit()
-            return runner.output
-        }
-
-        let reports = try JSONDecoder().decode([CodexBarReport].self, from: output)
-        guard let report = reports.first(where: { $0.provider == "codex" }) ?? reports.first else {
-            throw CodexLocalCostServiceError.unavailable
-        }
-
-        let totalCost = Decimal(report.last30DaysCostUSD ?? report.totals?.totalCost ?? 0)
-        let totalTokens = max(
-            0,
-            report.last30DaysTokens
-                ?? report.totals?.totalTokens
-                ?? report.daily.reduce(0) { $0 + ($1.totalTokens ?? 0) }
-        )
-
-        let calendar = Calendar.current
-        let startDay = calendar.startOfDay(for: interval.start)
-        let endDay = calendar.startOfDay(for: interval.end)
-        let days = report.daily.compactMap { day -> CodexCostDay? in
-            guard let date = Self.codexBarDate(day.date),
-                  date >= startDay,
-                  date <= endDay
-            else { return nil }
-            let tokens = max(0, day.totalTokens ?? (day.inputTokens ?? 0) + (day.outputTokens ?? 0))
-            return CodexCostDay(
-                date: date,
-                amount: Decimal(day.totalCost ?? 0),
-                pricedTokenCount: tokens,
-                unpricedTokenCount: 0
-            )
-        }.sorted { $0.date > $1.date }
-
-        var modelsByName: [String: CodexBarModelAggregate] = [:]
-        for day in report.daily {
-            guard let date = Self.codexBarDate(day.date), date >= startDay, date <= endDay else { continue }
-            for model in day.modelBreakdowns ?? [] {
-                var aggregate = modelsByName[model.modelName] ?? CodexBarModelAggregate()
-                aggregate.amount += Decimal(model.cost ?? 0)
-                aggregate.pricedTokenCount += max(0, model.totalTokens ?? 0)
-                modelsByName[model.modelName] = aggregate
-            }
-        }
-        let models = modelsByName.map { name, aggregate in
-            CodexCostModel(
-                model: name,
-                amount: aggregate.amount,
-                pricedTokenCount: aggregate.pricedTokenCount,
-                unpricedTokenCount: 0
-            )
-        }.sorted {
-            if $0.amount == $1.amount {
-                return $0.model.localizedStandardCompare($1.model) == .orderedAscending
-            }
-            return $0.amount > $1.amount
-        }
-
-        let coverage = report.coverage
-        let partial = report.historyCoverageIsEstablished == false
-            || (coverage?.estimated ?? 0) > 0
-            || (coverage?.unmetered ?? 0) > 0
-            || (coverage?.unpriced ?? 0) > 0
-        let refreshedAt = Self.codexBarDateTime(report.updatedAt) ?? Date()
-        return CodexCostEstimate(
-            measurement: CodexCostMeasurement(
-                amount: totalCost,
-                currency: report.currencyCode ?? "USD",
-                pricingAsOf: Self.pricingAsOf,
-                interval: interval,
-                partial: partial
-            ),
-            pricedTokenCount: totalTokens,
-            unpricedTokenCount: 0,
-            dailyBreakdown: days,
-            modelBreakdown: models,
-            refreshedAt: refreshedAt
-        )
-    }
-
-    private static func codexBarExecutableURL() -> URL? {
-        let candidates = [
-            "/opt/homebrew/bin/codexbar",
-            "/usr/local/bin/codexbar",
-            "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
-        ]
-        return candidates
-            .map(URL.init(fileURLWithPath:))
-            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
-    private static func codexBarDate(_ value: String) -> Date? {
-        let components = value.split(separator: "-").compactMap { Int($0) }
-        guard components.count == 3 else { return nil }
-        var calendar = Calendar.current
-        return calendar.date(from: DateComponents(
-            calendar: calendar,
-            timeZone: calendar.timeZone,
-            year: components[0],
-            month: components[1],
-            day: components[2]
-        ))
-    }
-
-    private static func codexBarDateTime(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
-    private struct CodexBarReport: Decodable {
-        let provider: String?
-        let currencyCode: String?
-        let updatedAt: String?
-        let historyCoverageIsEstablished: Bool?
-        let last30DaysTokens: Int64?
-        let last30DaysCostUSD: Double?
-        let coverage: CodexBarCoverage?
-        let totals: CodexBarTotals?
-        let daily: [CodexBarDay]
-    }
-
-    private struct CodexBarCoverage: Decodable {
-        let estimated: Int
-        let unmetered: Int
-        let unpriced: Int
-    }
-
-    private struct CodexBarTotals: Decodable {
-        let totalTokens: Int64?
-        let totalCost: Double?
-    }
-
-    private struct CodexBarDay: Decodable {
-        let date: String
-        let inputTokens: Int64?
-        let outputTokens: Int64?
-        let totalTokens: Int64?
-        let totalCost: Double?
-        let modelBreakdowns: [CodexBarModel]?
-    }
-
-    private struct CodexBarModel: Decodable {
-        let modelName: String
-        let cost: Double?
-        let totalTokens: Int64?
-    }
-
-    private struct CodexBarModelAggregate {
-        var amount: Decimal = .zero
-        var pricedTokenCount: Int64 = 0
     }
 
     private func discoverFiles(for interval: DateInterval, deadline: Date) -> [URL] {
@@ -341,8 +164,10 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var buffer = Data()
         var previous = TokenCounters.zero
         var intervalPrevious: TokenCounters?
-        var contributions: [(date: Date, model: String?, usage: TokenCounters)] = []
+        var snapshotContributions: [(date: Date, model: String?, usage: TokenCounters)] = []
+        var incrementalContributions: [(date: Date, model: String?, usage: TokenCounters)] = []
         var model: String?
+        var detectedPlanType: String?
         var sawRecord = false
         var partial = false
         let primaryDateFormatter = ISO8601DateFormatter()
@@ -372,6 +197,9 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             if let candidate = parsed.model, !candidate.isEmpty {
                 model = candidate
             }
+            if let candidate = parsed.planType, !candidate.isEmpty {
+                detectedPlanType = candidate
+            }
             guard let counters = parsed.counters else {
                 return
             }
@@ -384,11 +212,19 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
                 isInInterval = true
                 partial = true
             }
+            if parsed.isIncremental {
+                if isInInterval, !counters.isZero {
+                    incrementalContributions.append(
+                        (date: timestamp ?? fallbackDate, model: model, usage: counters)
+                    )
+                }
+                return
+            }
             if isInInterval {
                 if intervalPrevious == nil { intervalPrevious = previous }
                 if let intervalPrevious {
                     if let delta = counters.delta(from: intervalPrevious), !delta.isZero {
-                        contributions.append(
+                        snapshotContributions.append(
                             (date: timestamp ?? fallbackDate, model: model, usage: delta)
                         )
                     } else if counters != intervalPrevious {
@@ -421,10 +257,18 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             partial = true
         }
 
-        guard sawRecord else { return ScanResult(partial: partial) }
+        guard sawRecord else { return ScanResult(partial: partial, planType: detectedPlanType) }
 
-        var result = ScanResult(partial: partial)
-        for contribution in contributions {
+        // Newer Codex rollouts include one incremental `token_usage_record`
+        // per response alongside cumulative `token_count` snapshots. Prefer
+        // the incremental records when present so the same response is not
+        // counted twice and forked/interleaved cumulative totals cannot inflate
+        // the API-equivalent amount. Older rollouts use the snapshot path.
+        let selectedContributions = incrementalContributions.isEmpty
+            ? snapshotContributions
+            : incrementalContributions
+        var result = ScanResult(partial: partial, planType: detectedPlanType)
+        for contribution in selectedContributions {
             let model = contribution.model ?? "Unknown model"
             let billableTokens = contribution.usage.billableTokens
             guard let rawModel = contribution.model,
@@ -462,13 +306,14 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         let model: String?
         let counters: TokenCounters?
         let timestamp: Date?
+        let isIncremental: Bool
+        let planType: String?
     }
 
     /// Parse only the small fields that affect pricing. Codex rollout lines can
     /// contain very large prompts and tool payloads, so deserializing every
     /// token row with JSONSerialization makes a month of local history take
-    /// minutes. This deliberately follows the same byte-oriented strategy as
-    /// CodexBar while keeping the scanner self-contained and read-only.
+    /// minutes. This keeps the scanner self-contained and read-only.
     private static func parseRelevantLine(
         _ line: Data,
         primaryDateFormatter: ISO8601DateFormatter,
@@ -481,20 +326,54 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             return ParsedLine(
                 model: stringValue(for: "model", in: bytes),
                 counters: nil,
-                timestamp: nil
+                timestamp: nil,
+                isIncremental: false,
+                planType: nil
             )
         }
 
-        guard contains(Array(#""token_count""#.utf8), in: bytes) else {
+        let isIncremental = contains(Array(#""token_usage_record""#.utf8), in: bytes)
+        let isSnapshot = contains(Array(#""token_count""#.utf8), in: bytes)
+        guard isIncremental || isSnapshot else {
             return nil
         }
 
         let timestamp = stringValue(for: "timestamp", in: bytes).flatMap {
             primaryDateFormatter.date(from: $0) ?? fallbackDateFormatter.date(from: $0)
         }
+        if isIncremental {
+            guard contains(Array(#""usage""#.utf8), in: bytes) else {
+                return ParsedLine(
+                    model: nil,
+                    counters: nil,
+                    timestamp: timestamp,
+                    isIncremental: true,
+                    planType: nil
+                )
+            }
+            return ParsedLine(
+                model: nil,
+                counters: TokenCounters(
+                    input: integerValue(for: "input_tokens", in: bytes),
+                    cached: integerValue(for: "cached_input_tokens", in: bytes),
+                    cacheWrite: integerValue(for: "cache_write_input_tokens", in: bytes),
+                    output: integerValue(for: "output_tokens", in: bytes)
+                ),
+                timestamp: timestamp,
+                isIncremental: true,
+                planType: nil
+            )
+        }
+
         guard contains(Array(#""total_token_usage""#.utf8), in: bytes)
                 || contains(Array(#""last_token_usage""#.utf8), in: bytes) else {
-            return ParsedLine(model: nil, counters: nil, timestamp: timestamp)
+            return ParsedLine(
+                model: nil,
+                counters: nil,
+                timestamp: timestamp,
+                isIncremental: false,
+                planType: stringValue(for: "plan_type", in: bytes)
+            )
         }
 
         let counters = TokenCounters(
@@ -503,7 +382,13 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             cacheWrite: integerValue(for: "cache_write_input_tokens", in: bytes),
             output: integerValue(for: "output_tokens", in: bytes)
         )
-        return ParsedLine(model: nil, counters: counters, timestamp: timestamp)
+        return ParsedLine(
+            model: nil,
+            counters: counters,
+            timestamp: timestamp,
+            isIncremental: false,
+            planType: stringValue(for: "plan_type", in: bytes)
+        )
     }
 
     private static func stringValue(for key: String, in bytes: [UInt8]) -> String? {
@@ -600,6 +485,8 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
     private static func rates(for rawModel: String) -> Rates? {
         var model = rawModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if model.hasPrefix("openai/") { model.removeFirst("openai/".count) }
+        if model == "gpt-5.6" { model = "gpt-5.6-sol" }
+        if model == "gpt-reserve" { model = "gpt-5.6-luna" }
         if model.count > 11 {
             let suffix = String(model.suffix(11))
             if Self.isDateSuffix(suffix) {
@@ -607,18 +494,59 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
             }
         }
         switch model {
-        // Rates mirror CodexBar's local Codex cost table. Cache writes fall
-        // back to ordinary input pricing for models without a separate rate.
-        case "gpt-5.6", "gpt-5.6-sol":
-            return Rates(input: 5, cached: 0.5, cacheWrite: 6.25, output: 30)
-        case "gpt-5.6-terra":
-            return Rates(input: 2, cached: 0.2, cacheWrite: 2.5, output: 12)
-        case "gpt-5.6-luna":
-            return Rates(input: 0.2, cached: 0.02, cacheWrite: 0.25, output: 1.2)
+        // Rates are the published API equivalents used for the local estimate.
+        // Cache writes fall back to ordinary input pricing for models without
+        // a separate rate.
+        case "gpt-5":
+            return Rates(input: 1.25, cached: 0.125, output: 10)
+        case "gpt-5-codex", "gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-max":
+            return Rates(input: 1.25, cached: 0.125, output: 10)
+        case "gpt-5-mini", "gpt-5.1-codex-mini":
+            return Rates(input: 0.25, cached: 0.025, output: 2)
+        case "gpt-5-nano":
+            return Rates(input: 0.05, cached: 0.005, output: 0.4)
+        case "gpt-5-pro":
+            return Rates(input: 15, output: 120)
+        case "gpt-5.2", "gpt-5.2-codex", "gpt-5.3-codex":
+            return Rates(input: 1.75, cached: 0.175, output: 14)
+        case "gpt-5.2-pro":
+            return Rates(input: 21, output: 168)
+        case "gpt-5.3-codex-spark":
+            return Rates(input: 0, cached: 0, cacheWrite: 0, output: 0)
+        case "gpt-5.4":
+            return Rates(
+                input: 2.5, cached: 0.25, output: 15,
+                thresholdTokens: 272_000, inputAbove: 5, cachedAbove: 0.5, outputAbove: 22.5)
+        case "gpt-5.4-mini":
+            return Rates(input: 0.75, cached: 0.075, output: 4.5)
+        case "gpt-5.4-nano":
+            return Rates(input: 0.2, cached: 0.02, output: 1.25)
+        case "gpt-5.4-pro", "gpt-5.5-pro":
+            return Rates(input: 30, output: 180)
+        case "gpt-5.5":
+            return Rates(
+                input: 5, cached: 0.5, output: 30,
+                thresholdTokens: 272_000, inputAbove: 10, cachedAbove: 1, outputAbove: 45)
         case "gpt-6-astra":
-            return Rates(input: 10, cached: 1, cacheWrite: 12.5, output: 50)
-        case "gpt-5", "gpt-5-codex", "gpt-5.1", "gpt-5.1-codex":
-            return Rates(input: 1.25, cached: 0.125, cacheWrite: 1.25, output: 10)
+            return Rates(
+                input: 10, cached: 1, cacheWrite: 12.5, output: 50,
+                thresholdTokens: 272_000, inputAbove: 20, cachedAbove: 2,
+                cacheWriteAbove: 25, outputAbove: 75)
+        case "gpt-5.6-sol":
+            return Rates(
+                input: 5, cached: 0.5, cacheWrite: 6.25, output: 30,
+                thresholdTokens: 272_000, inputAbove: 10, cachedAbove: 1,
+                cacheWriteAbove: 12.5, outputAbove: 45)
+        case "gpt-5.6-terra":
+            return Rates(
+                input: 2, cached: 0.2, cacheWrite: 2.5, output: 12,
+                thresholdTokens: 272_000, inputAbove: 4, cachedAbove: 0.4,
+                cacheWriteAbove: 5, outputAbove: 18)
+        case "gpt-5.6-luna":
+            return Rates(
+                input: 0.2, cached: 0.02, cacheWrite: 0.25, output: 1.2,
+                thresholdTokens: 272_000, inputAbove: 0.4, cachedAbove: 0.04,
+                cacheWriteAbove: 0.5, outputAbove: 1.8)
         default:
             return nil
         }
@@ -635,10 +563,17 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
 
     private static func cost(for usage: TokenCounters, rates: Rates) -> Decimal {
         let ordinaryInput = max(0, usage.input - usage.cached - usage.cacheWrite)
-        let input = Decimal(ordinaryInput) * rates.input
-            + Decimal(usage.cached) * rates.cached
-            + Decimal(usage.cacheWrite) * rates.cacheWrite
-        let output = Decimal(usage.output) * rates.output
+        let usesLongContextRates = rates.thresholdTokens.map { usage.input > $0 } ?? false
+        let inputRate = usesLongContextRates ? rates.inputAbove ?? rates.input : rates.input
+        let cachedRate = usesLongContextRates ? rates.cachedAbove ?? rates.cached : rates.cached
+        let cacheWriteRate = usesLongContextRates
+            ? rates.cacheWriteAbove ?? rates.cacheWrite
+            : rates.cacheWrite
+        let outputRate = usesLongContextRates ? rates.outputAbove ?? rates.output : rates.output
+        let input = Decimal(ordinaryInput) * inputRate
+            + Decimal(min(max(0, usage.cached), max(0, usage.input))) * cachedRate
+            + Decimal(min(max(0, usage.cacheWrite), max(0, usage.input - usage.cached))) * cacheWriteRate
+        let output = Decimal(max(0, usage.output)) * outputRate
         return (input + output) / 1_000_000
     }
 
@@ -647,12 +582,32 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         let cached: Decimal
         let cacheWrite: Decimal
         let output: Decimal
+        let thresholdTokens: Int?
+        let inputAbove: Decimal?
+        let cachedAbove: Decimal?
+        let cacheWriteAbove: Decimal?
+        let outputAbove: Decimal?
 
-        init(input: Double, cached: Double, cacheWrite: Double, output: Double) {
+        init(
+            input: Double,
+            cached: Double? = nil,
+            cacheWrite: Double? = nil,
+            output: Double,
+            thresholdTokens: Int? = nil,
+            inputAbove: Double? = nil,
+            cachedAbove: Double? = nil,
+            cacheWriteAbove: Double? = nil,
+            outputAbove: Double? = nil
+        ) {
             self.input = Decimal(input)
-            self.cached = Decimal(cached)
-            self.cacheWrite = Decimal(cacheWrite)
+            self.cached = Decimal(cached ?? input)
+            self.cacheWrite = Decimal(cacheWrite ?? input)
             self.output = Decimal(output)
+            self.thresholdTokens = thresholdTokens
+            self.inputAbove = inputAbove.map { Decimal($0) }
+            self.cachedAbove = cachedAbove.map { Decimal($0) }
+            self.cacheWriteAbove = cacheWriteAbove.map { Decimal($0) }
+            self.outputAbove = outputAbove.map { Decimal($0) }
         }
     }
 
@@ -662,6 +617,7 @@ actor CodexLocalCostService: CodexLocalCostEstimating {
         var unpricedTokens: Int64 = 0
         var partial = false
         var contributions: [CostContribution] = []
+        var planType: String?
     }
 
     private struct CostContribution {

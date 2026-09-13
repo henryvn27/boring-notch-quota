@@ -136,6 +136,9 @@ struct CodexSettings: View {
     @ObservedObject private var manager = CodexUsageManager.shared
     @Default(.codexUsageMetric) private var usageMetric
     @Default(.codexPreferredWindow) private var preferredWindow
+    @Default(.codexQuotaWindowDisplayMode) private var quotaWindowDisplayMode
+    @Default(.codexCostHistoryRange) private var costHistoryRange
+    @Default(.codexPlanPricing) private var codexPlanPricing
     @Default(.codexClosedContentMode) private var closedContentMode
 
     private var availableWindowPreferences: [CodexQuotaWindowPreference] {
@@ -144,6 +147,13 @@ struct CodexSettings: View {
 
     private var windowAvailability: CodexQuotaWindowAvailability {
         manager.snapshot?.windowAvailability ?? .unknown
+    }
+
+    private var planInfo: CodexPlanInfo {
+        CodexPlanInfo.resolve(
+            planType: manager.costEstimate?.planType ?? manager.snapshot?.planType,
+            pricing: codexPlanPricing
+        )
     }
 
     var body: some View {
@@ -165,6 +175,17 @@ struct CodexSettings: View {
             }
 
             Section("Quota window") {
+                Picker("Visible windows", selection: $quotaWindowDisplayMode) {
+                    ForEach(CodexQuotaWindowDisplayMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(quotaWindowDisplayMode.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 if availableWindowPreferences.count > 1 {
                     Picker("Preferred window", selection: $preferredWindow) {
                         ForEach(availableWindowPreferences) { window in
@@ -197,6 +218,53 @@ struct CodexSettings: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
+
+            Section("API cost history") {
+                Picker("History range", selection: $costHistoryRange) {
+                    ForEach(CodexCostHistoryRange.allCases) { range in
+                        Text(range.label).tag(range)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text("Short ranges use daily bars. Three months rolls up to weeks, while a year or all available history uses monthly bars so the graph stays readable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Plan cost context") {
+                Picker("Plan price", selection: $codexPlanPricing) {
+                    ForEach(CodexPlanPricing.allCases) { pricing in
+                        Text(pricing.label).tag(pricing)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if manager.costEstimate?.planType != nil || manager.snapshot?.planType != nil {
+                    LabeledContent("Detected plan") {
+                        Text(planInfo.planLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Checking the plan returned by Codex…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if planInfo.isPriceAmbiguous && codexPlanPricing == .automatic {
+                    Text("Codex reports Pro but does not distinguish the $100 and $200 tiers. Choose the tier above so the API-equivalent multiplier is accurate.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if let monthlyPriceLabel = planInfo.monthlyPriceLabel {
+                    Text("The API-equivalent card will compare local usage with your \(monthlyPriceLabel) plan cost over the selected history range.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Plan pricing is used only to contextualize the local API-price estimate. It never changes quota data or billing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Closed-notch presentation") {
@@ -242,8 +310,11 @@ struct CodexSettings: View {
         }
         .navigationTitle("Codex")
         .onAppear {
-            manager.start()
+            manager.start(costRange: costHistoryRange)
             normalizePreferredWindow()
+        }
+        .onChange(of: costHistoryRange) { _, range in
+            manager.selectCostHistoryRange(range)
         }
         .onChange(of: manager.snapshot) { _, _ in
             normalizePreferredWindow()

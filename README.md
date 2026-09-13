@@ -27,7 +27,9 @@ approvals, or hooks.
 
 This fork deliberately does **not** install Codex hooks, observe task activity,
 capture prompts, or show agent progress. Official quota data comes from the
-local Codex app-server; local cost data is read-only and bounded.
+local Codex app-server; local cost data is read-only and bounded. The cost
+scanner is self-contained in Notch and does not require CodexBar or any other
+separately installed usage monitor.
 
 ## Install
 

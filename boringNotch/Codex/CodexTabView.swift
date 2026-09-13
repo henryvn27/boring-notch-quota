@@ -8,9 +8,12 @@ struct CodexTabView: View {
     @State private var presentationDate = Date()
     @Default(.codexUsageMetric) private var usageMetric
     @Default(.codexPreferredWindow) private var preferredWindow
+    @Default(.codexQuotaWindowDisplayMode) private var quotaWindowDisplayMode
+    @Default(.codexCostHistoryRange) private var costHistoryRange
     @Default(.codexShowPace) private var showPace
     @Default(.codexShowCostEstimate) private var showCostEstimate
     @Default(.codexShowResetForecast) private var showResetForecast
+    @Default(.codexPlanPricing) private var codexPlanPricing
     @State private var showingCostDetail = false
 
     // The compact quota overview fits in the normal Boring Notch height. The
@@ -18,6 +21,23 @@ struct CodexTabView: View {
     // local breakdown is visible at once instead of hiding data behind a
     // nested scroll view.
     private static let costDetailNotchHeight: CGFloat = 380
+
+    private struct CostGraphBucket: Identifiable {
+        let start: Date
+        let end: Date
+        let amount: Decimal
+        let pricedTokenCount: Int64
+        let unpricedTokenCount: Int64
+
+        var id: Date { start }
+    }
+
+    private var planInfo: CodexPlanInfo {
+        CodexPlanInfo.resolve(
+            planType: manager.costEstimate?.planType ?? manager.snapshot?.planType,
+            pricing: codexPlanPricing
+        )
+    }
 
     var body: some View {
         Group {
@@ -41,8 +61,11 @@ struct CodexTabView: View {
             }
         }
         .onAppear {
-            manager.start()
+            manager.start(costRange: costHistoryRange)
             updateNotchHeightForCostDetail()
+        }
+        .onChange(of: costHistoryRange) { _, range in
+            manager.selectCostHistoryRange(range)
         }
         .onChange(of: showingCostDetail) { _, _ in
             updateNotchHeightForCostDetail()
@@ -171,17 +194,20 @@ struct CodexTabView: View {
         } label: {
             CodexCard(
                 title: "API equivalent",
-                subtitle: "This Mac · 30 days"
+                subtitle: "This Mac · \(costHistoryRange.label)"
             ) {
                 if let estimate = manager.costEstimate {
-                    if estimate.pricedTokenCount > 0 {
-                        Text(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))
-                            .font(.title2.weight(.semibold).monospacedDigit())
-                            .accessibilityLabel("API equivalent \(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))")
-                    } else {
-                        Text("—")
-                            .font(.title2.weight(.semibold).monospacedDigit())
-                            .accessibilityLabel("No priced local usage")
+                    VStack(alignment: .leading, spacing: 1) {
+                        if estimate.pricedTokenCount > 0 {
+                            Text(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))
+                                .font(.title2.weight(.semibold).monospacedDigit())
+                                .accessibilityLabel("API equivalent \(currencyString(estimate.measurement.amount, code: estimate.measurement.currency))")
+                        } else {
+                            Text("—")
+                                .font(.title2.weight(.semibold).monospacedDigit())
+                                .accessibilityLabel("No priced local usage")
+                        }
+                        planCostContext(estimate, compact: true)
                     }
                 } else if let error = manager.costError {
                     unavailableRow(error)
@@ -217,6 +243,26 @@ struct CodexTabView: View {
 
                 Spacer(minLength: 4)
 
+                Menu {
+                    ForEach(CodexCostHistoryRange.allCases) { range in
+                        Button {
+                            costHistoryRange = range
+                        } label: {
+                            if range == costHistoryRange {
+                                Label(range.label, systemImage: "checkmark")
+                            } else {
+                                Text(range.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(costHistoryRange.shortLabel, systemImage: "calendar")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("API cost history range")
+
                 Button {
                     manager.refreshNow()
                 } label: {
@@ -250,9 +296,14 @@ struct CodexTabView: View {
 
     private var costIntervalLabel: String {
         guard let estimate = manager.costEstimate else { return "This Mac · local history" }
-        let start = estimate.measurement.interval.start.formatted(.dateTime.month(.abbreviated).day())
-        let end = estimate.measurement.interval.end.formatted(.dateTime.month(.abbreviated).day())
-        return "This Mac · \(start)–\(end)"
+        let firstAvailableDate = costHistoryRange == .allAvailable
+            ? estimate.dailyBreakdown.min(by: { $0.date < $1.date })?.date
+            : nil
+        let startDate = firstAvailableDate ?? estimate.measurement.interval.start
+        let start = startDate.formatted(.dateTime.month(.abbreviated).day().year())
+        let end = estimate.measurement.interval.end.formatted(.dateTime.month(.abbreviated).day().year())
+        let prefix = costHistoryRange == .allAvailable ? "All available · " : ""
+        return "This Mac · \(prefix)\(start)–\(end)"
     }
 
     private func costSummary(_ estimate: CodexCostEstimate) -> some View {
@@ -268,6 +319,7 @@ struct CodexTabView: View {
                 Text("API-price estimate")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                planCostContext(estimate, compact: false)
             }
 
             Spacer(minLength: 4)
@@ -286,53 +338,206 @@ struct CodexTabView: View {
         .accessibilityElement(children: .combine)
     }
 
+    @ViewBuilder
+    private func planCostContext(_ estimate: CodexCostEstimate, compact: Bool) -> some View {
+        if let multiplier = planInfo.multiplier(for: estimate, historyRange: costHistoryRange) {
+            Text("\(formattedPlanMultiplier(multiplier))× the cost of your \(planInfo.planLabel) plan")
+                .font((compact ? Font.caption2 : Font.caption).weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.effectiveAccent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .accessibilityLabel(
+                    "\(formattedPlanMultiplier(multiplier)) times the cost of your \(planInfo.planLabel) plan"
+                )
+        } else if planInfo.isPriceAmbiguous {
+            Text("Pro plan · choose $100 or $200 in Codex settings")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        } else if planInfo.isDetected, planInfo.monthlyPrice == nil {
+            Text("\(planInfo.planLabel) plan · no fixed monthly price")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private func formattedPlanMultiplier(_ multiplier: Double) -> String {
+        let rounded = multiplier >= 10
+            ? multiplier.rounded()
+            : (multiplier * 10).rounded() / 10
+        let fractionLength = rounded == rounded.rounded() ? 0 : 1
+        return rounded.formatted(.number.precision(.fractionLength(fractionLength)))
+    }
+
     private func dailyCostBreakdown(_ estimate: CodexCostEstimate) -> some View {
-        let days = Array(estimate.dailyBreakdown.prefix(14).reversed())
-        let maximum = days.map { decimalDouble($0.amount) }.max() ?? 0
+        let granularity = costHistoryRange.bucketGranularity
+        let buckets = costGraphBuckets(estimate, granularity: granularity)
+        let maximum = buckets.map { decimalDouble($0.amount) }.max() ?? 0
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text("By day")
+                Text("By \(granularity.label)")
                     .font(.caption.weight(.semibold))
                 Spacer(minLength: 4)
-                Text(days.isEmpty ? "No priced activity" : "Last \(days.count) active days")
+                Text(buckets.isEmpty ? "No priced activity" : "\(buckets.count) \(granularity.label)s")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            if days.isEmpty {
+            if buckets.isEmpty {
                 Text("No priced local usage was found in this period.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
             } else {
-                HStack(alignment: .bottom, spacing: 4) {
-                    ForEach(days) { day in
-                        VStack(spacing: 2) {
-                            Text(shortCurrencyString(day.amount, code: estimate.measurement.currency))
-                                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.65)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .bottom, spacing: 8) {
+                            ForEach(buckets) { bucket in
+                                VStack(spacing: 2) {
+                                    Text(shortCurrencyString(bucket.amount, code: estimate.measurement.currency))
+                                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.65)
 
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Color.accentColor.opacity(0.82))
-                                .frame(height: barHeight(for: day.amount, maximum: maximum))
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.accentColor.opacity(0.82))
+                                        .frame(height: barHeight(for: bucket.amount, maximum: maximum))
 
-                            Text(shortDayLabel(day.date))
-                                .font(.system(size: 8, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
+                                    Text(costBucketLabel(bucket.start, granularity: granularity))
+                                        .font(.system(size: 8, weight: .medium, design: .rounded))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(width: 42, alignment: .bottom)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel(
+                                    "\(costBucketAccessibilityLabel(bucket, granularity: granularity)), "
+                                        + currencyString(bucket.amount, code: estimate.measurement.currency)
+                                )
+                                .id(bucket.id)
+                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .bottom)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(
-                            "\(day.date.formatted(date: .abbreviated, time: .omitted)), "
-                                + currencyString(day.amount, code: estimate.measurement.currency)
-                        )
+                        .padding(.horizontal, 1)
+                    }
+                    .frame(height: 68, alignment: .bottom)
+                    .onAppear {
+                        guard let latestBucket = buckets.last else { return }
+                        // Start at the newest activity; dragging left reveals
+                        // progressively older days in the loaded interval.
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(latestBucket.id, anchor: .trailing)
+                        }
                     }
                 }
-                .frame(height: 68, alignment: .bottom)
             }
+        }
+    }
+
+    private func costGraphBuckets(
+        _ estimate: CodexCostEstimate,
+        granularity: CodexCostBucketGranularity
+    ) -> [CostGraphBucket] {
+        let calendar = Calendar.current
+        var intervalStart = estimate.measurement.interval.start
+
+        // The all-available query is bounded by the local session scan.
+        // Trim leading empty periods to the first returned day so a long-lived
+        // install does not render years of blank bars.
+        if costHistoryRange == .allAvailable,
+           let firstDay = estimate.dailyBreakdown.min(by: { $0.date < $1.date }) {
+            intervalStart = firstDay.date
+        }
+
+        let firstBucket = costBucketStart(intervalStart, granularity: granularity, calendar: calendar)
+        let lastBucket = costBucketStart(estimate.measurement.interval.end, granularity: granularity, calendar: calendar)
+        var aggregates: [Date: (amount: Decimal, priced: Int64, unpriced: Int64)] = [:]
+
+        for day in estimate.dailyBreakdown {
+            let bucketStart = costBucketStart(day.date, granularity: granularity, calendar: calendar)
+            var aggregate = aggregates[bucketStart] ?? (.zero, 0, 0)
+            aggregate.amount += day.amount
+            aggregate.priced += day.pricedTokenCount
+            aggregate.unpriced += day.unpricedTokenCount
+            aggregates[bucketStart] = aggregate
+        }
+
+        var buckets: [CostGraphBucket] = []
+        var cursor = firstBucket
+        while cursor <= lastBucket {
+            let next = nextCostBucketStart(cursor, granularity: granularity, calendar: calendar)
+            let aggregate = aggregates[cursor] ?? (.zero, 0, 0)
+            buckets.append(
+                CostGraphBucket(
+                    start: cursor,
+                    end: next,
+                    amount: aggregate.amount,
+                    pricedTokenCount: aggregate.priced,
+                    unpricedTokenCount: aggregate.unpriced
+                )
+            )
+            guard next > cursor else { break }
+            cursor = next
+        }
+        return buckets
+    }
+
+    private func costBucketStart(
+        _ date: Date,
+        granularity: CodexCostBucketGranularity,
+        calendar: Calendar
+    ) -> Date {
+        switch granularity {
+        case .day:
+            return calendar.startOfDay(for: date)
+        case .week:
+            return calendar.dateInterval(of: .weekOfYear, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+        case .month:
+            return calendar.dateInterval(of: .month, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+        }
+    }
+
+    private func nextCostBucketStart(
+        _ date: Date,
+        granularity: CodexCostBucketGranularity,
+        calendar: Calendar
+    ) -> Date {
+        switch granularity {
+        case .day:
+            return calendar.date(byAdding: .day, value: 1, to: date) ?? date
+        case .week:
+            return calendar.date(byAdding: .weekOfYear, value: 1, to: date) ?? date
+        case .month:
+            return calendar.date(byAdding: .month, value: 1, to: date) ?? date
+        }
+    }
+
+    private func costBucketLabel(_ date: Date, granularity: CodexCostBucketGranularity) -> String {
+        switch granularity {
+        case .day, .week:
+            return date.formatted(.dateTime.month(.abbreviated).day())
+        case .month:
+            return date.formatted(.dateTime.month(.abbreviated).year(.twoDigits))
+        }
+    }
+
+    private func costBucketAccessibilityLabel(
+        _ bucket: CostGraphBucket,
+        granularity: CodexCostBucketGranularity
+    ) -> String {
+        switch granularity {
+        case .day:
+            return bucket.start.formatted(date: .abbreviated, time: .omitted)
+        case .week:
+            let end = bucket.end.addingTimeInterval(-1)
+            return "Week of \(bucket.start.formatted(date: .abbreviated, time: .omitted)) through \(end.formatted(date: .abbreviated, time: .omitted))"
+        case .month:
+            return bucket.start.formatted(.dateTime.month(.wide).year())
         }
     }
 
@@ -435,10 +640,6 @@ struct CodexTabView: View {
         return max(4, CGFloat(decimalDouble(amount) / maximum) * 42)
     }
 
-    private func shortDayLabel(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.abbreviated).day())
-    }
-
     private var forecastCard: some View {
         CodexCard(
             title: "Chance of reset",
@@ -514,6 +715,10 @@ struct CodexTabView: View {
         let hasFiveHour = sorted.contains { $0.standardWindow == .fiveHour }
         let hasWeekly = sorted.contains { $0.standardWindow == .weekly }
 
+        if quotaWindowDisplayMode == .weeklyOnly, let weekly = limit(for: .weekly) {
+            return [weekly]
+        }
+
         // A weekly-only account gets one full-width graph. Do not fill the
         // second lane with an unrelated bucket or an invented 5-hour value.
         if hasWeekly && !hasFiveHour, let weekly = limit(for: .weekly) {
@@ -526,9 +731,11 @@ struct CodexTabView: View {
         if let preferred = limit(for: preferredWindow) {
             result.append(preferred)
         }
-        let secondaryWindow: CodexQuotaWindowPreference = preferredWindow == .fiveHour ? .weekly : .fiveHour
-        if let secondary = limit(for: secondaryWindow), !result.contains(where: { $0.id == secondary.id }) {
-            result.append(secondary)
+        if quotaWindowDisplayMode != .weeklyOnly {
+            let secondaryWindow: CodexQuotaWindowPreference = preferredWindow == .fiveHour ? .weekly : .fiveHour
+            if let secondary = limit(for: secondaryWindow), !result.contains(where: { $0.id == secondary.id }) {
+                result.append(secondary)
+            }
         }
         let knownIDs = Set(result.map(\.id))
         result.append(contentsOf: sorted.filter {

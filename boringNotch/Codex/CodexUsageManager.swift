@@ -1,4 +1,5 @@
 import Combine
+import Defaults
 import Foundation
 
 @MainActor
@@ -7,6 +8,7 @@ final class CodexUsageManager: ObservableObject {
 
     @Published private(set) var snapshot: CodexUsageSnapshot?
     @Published private(set) var costEstimate: CodexCostEstimate?
+    @Published private(set) var costHistoryRange: CodexCostHistoryRange = .last30Days
     @Published private(set) var forecast: CodexResetForecast?
     @Published private(set) var isRefreshing = false
     @Published private(set) var isOfficialRefreshing = false
@@ -26,6 +28,8 @@ final class CodexUsageManager: ObservableObject {
     private var officialTask: Task<Void, Never>?
     private var costTask: Task<Void, Never>?
     private var forecastTask: Task<Void, Never>?
+    private var cachedCostEstimates: [CodexCostHistoryRange: CodexCostEstimate] = [:]
+    private var costRequestID = UUID()
 
     init(
         usageService: any CodexUsageFetching = CodexUsageService(),
@@ -37,12 +41,16 @@ final class CodexUsageManager: ObservableObject {
         self.forecastService = forecastService
     }
 
-    func start() {
+    func start(costRange: CodexCostHistoryRange? = nil) {
+        let requestedRange = costRange ?? Defaults[.codexCostHistoryRange]
+        if requestedRange != costHistoryRange {
+            selectCostHistoryRange(requestedRange, force: true)
+        }
         guard periodicTask == nil else { return }
         refreshOfficial(force: true)
         // Warm the local cost estimate with the other Codex data at app
         // launch, so opening the tab later only reads the cached result.
-        refreshCost(force: true)
+        refreshCost(force: true, range: costHistoryRange)
         refreshForecast(force: true)
         periodicTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -70,8 +78,28 @@ final class CodexUsageManager: ObservableObject {
 
     func refreshNow() {
         refreshOfficial(force: true)
-        refreshCost(force: true)
+        refreshCost(force: true, range: costHistoryRange)
         refreshForecast(force: true)
+    }
+
+    func selectCostHistoryRange(_ range: CodexCostHistoryRange, force: Bool = false) {
+        guard force || range != costHistoryRange || costEstimate == nil else { return }
+
+        costHistoryRange = range
+        costRequestID = UUID()
+        costTask?.cancel()
+        costTask = nil
+        isCostRefreshing = false
+        costError = nil
+
+        if !force, let cached = cachedCostEstimates[range] {
+            costEstimate = cached
+            lastCostRefresh = cached.refreshedAt
+            return
+        }
+
+        costEstimate = nil
+        refreshCost(force: true, range: range)
     }
 
     func refreshIfNeeded(now: Date = Date(), includeCost: Bool = false) {
@@ -79,7 +107,9 @@ final class CodexUsageManager: ObservableObject {
             force: isStale(lastOfficialRefresh, interval: 5 * 60, now: now))
         if includeCost {
             refreshCost(
-                force: isStale(lastCostRefresh, interval: 5 * 60, now: now))
+                force: isStale(lastCostRefresh, interval: 5 * 60, now: now),
+                range: costHistoryRange
+            )
         }
         refreshForecast(
             force: isStale(lastForecastRefresh, interval: 15 * 60, now: now))
@@ -110,27 +140,28 @@ final class CodexUsageManager: ObservableObject {
         }
     }
 
-    private func refreshCost(force: Bool) {
+    private func refreshCost(force: Bool, range: CodexCostHistoryRange) {
         guard force, costTask == nil else { return }
         isCostRefreshing = true
         updateRefreshingState()
         let service = costService
         let now = Date()
-        let start = Calendar.current.date(byAdding: .day, value: -30, to: now) ?? now
-        let interval = DateInterval(start: start, end: now)
+        let interval = range.interval(endingAt: now)
+        let requestID = costRequestID
         costTask = Task { @MainActor [weak self] in
             do {
                 let next = try await service.estimate(interval: interval)
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.costRequestID == requestID else { return }
+                self.cachedCostEstimates[range] = next
                 self.costEstimate = next
                 self.costError = nil
             } catch is CancellationError {
                 return
             } catch {
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.costRequestID == requestID else { return }
                 self.costError = error.localizedDescription
             }
-            guard let self else { return }
+            guard let self, self.costRequestID == requestID else { return }
             self.lastCostRefresh = Date()
             self.isCostRefreshing = false
             self.costTask = nil

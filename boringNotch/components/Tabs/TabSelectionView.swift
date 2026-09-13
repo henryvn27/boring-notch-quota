@@ -23,11 +23,17 @@ let tabs = [
 struct TabSelectionView: View {
     @ObservedObject var coordinator = BoringViewCoordinator.shared
     @Namespace var animation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var selectionAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : NotchMotion.tabSwitch
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(tabs) { tab in
                     TabButton(label: tab.label, icon: tab.icon, selected: coordinator.currentView == tab.view) {
-                        withAnimation(.smooth) {
+                        withAnimation(selectionAnimation) {
                             coordinator.selectTab(tab.view)
                         }
                     }
