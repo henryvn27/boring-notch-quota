@@ -17,10 +17,10 @@ struct CodexTabView: View {
     @State private var showingCostDetail = false
 
     // The compact quota overview fits in the normal Boring Notch height. The
-    // cost detail view intentionally gets a taller surface so the complete
-    // local breakdown is visible at once instead of hiding data behind a
-    // nested scroll view.
-    private static let costDetailNotchHeight: CGFloat = 380
+    // cost detail view gets just enough extra height for the complete local
+    // breakdown; keeping this close to the content height avoids a large dead
+    // band beneath the rate note.
+    private static let baseCostDetailNotchHeight: CGFloat = 340
 
     private struct CostGraphBucket: Identifiable {
         let start: Date
@@ -68,6 +68,9 @@ struct CodexTabView: View {
             manager.selectCostHistoryRange(range)
         }
         .onChange(of: showingCostDetail) { _, _ in
+            updateNotchHeightForCostDetail()
+        }
+        .onChange(of: manager.costEstimate) { _, _ in
             updateNotchHeightForCostDetail()
         }
         .onDisappear {
@@ -678,13 +681,43 @@ struct CodexTabView: View {
     private func updateNotchHeightForCostDetail() {
         guard viewModel.notchState == .open else { return }
         let targetHeight = showingCostDetail
-            ? Self.costDetailNotchHeight
+            ? costDetailNotchHeight
             : openNotchSize.height
         guard viewModel.notchSize.height != targetHeight else { return }
 
         withAnimation(NotchMotion.open) {
             viewModel.notchSize = CGSize(width: openNotchSize.width, height: targetHeight)
         }
+    }
+
+    private var costDetailNotchHeight: CGFloat {
+        guard let estimate = manager.costEstimate else {
+            return Self.baseCostDetailNotchHeight
+        }
+
+        var height = Self.baseCostDetailNotchHeight
+
+        // The optional plan context and partial-estimate label each add one
+        // line. Grow only when those lines are actually present so the common
+        // case stays compact while fuller datasets remain unclipped.
+        if planInfo.multiplier(for: estimate, historyRange: costHistoryRange) != nil
+            || planInfo.isPriceAmbiguous
+            || (planInfo.isDetected && planInfo.monthlyPrice == nil)
+        {
+            height += 17
+        }
+
+        if estimate.measurement.partial || estimate.unpricedTokenCount > 0 {
+            height += 17
+        }
+
+        // The model list is capped at five rows below. Account for a fifth
+        // row only when it is present instead of reserving that space always.
+        if estimate.modelBreakdown.count > 4 {
+            height += 18
+        }
+
+        return min(height, openNotchSize.height * 2)
     }
 
     private func loadingRow(_ text: String) -> some View {
