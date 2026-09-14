@@ -1,0 +1,31 @@
+name: The Notch CLI
+
+on:
+  pull_request:
+    paths:
+      - "cli/**"
+      - "tests/cli/**"
+      - "scripts/install-the-notch-cli.sh"
+      - ".github/workflows/the-notch-cli.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - "tests/cli/**"
+      - "scripts/install-the-notch-cli.sh"
+      - ".github/workflows/the-notch-cli.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check shell syntax
+        run: sh -n scripts/install-the-notch-cli.sh
+      - name: Run CLI tests
+        run: python3 -m unittest discover -s tests/cli -v
+      - name: Compile CLI
+        run: python3 -m py_compile cli/the_notch.py

@@ -54,6 +54,40 @@ The Codex tab needs the local Codex app/CLI to provide official rate-limit
 data. If Codex is unavailable, the rest of Notch continues to work and the
 tab explains what is unavailable.
 
+## CLI for agents
+
+The repository includes a read-only `the-notch` CLI so Codex and other local
+agents can inspect the same quota and pacing signals without opening the app.
+It never changes a model, starts work, consumes a reset, or edits Codex
+configuration.
+
+Install it without administrator access:
+
+```bash
+./scripts/install-the-notch-cli.sh
+```
+
+Then use machine-readable output in an agent workflow:
+
+```bash
+the-notch status --json --record
+the-notch pace --json
+the-notch resets --json
+the-notch recommend --json
+```
+
+`--record` is explicit because it writes a small local history used to
+calculate the change in usage deficit over time. Without it, the CLI is
+read-only. Banked-reset data is reported as unknown when Codex does not expose
+it; unknown is never treated as zero.
+
+An agent can be given this bounded instruction:
+
+> Before long or parallel work, run `the-notch recommend --json`. Use the
+> recommendation as context, but do not change the user-selected model,
+> concurrency, or reset policy without asking first. Never treat missing or
+> stale usage data as permission to spend a reset.
+
 ## Privacy boundary
 
 Quota requests stay local to the Codex app-server. The cost estimate scans
